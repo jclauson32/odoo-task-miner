@@ -1,0 +1,47 @@
+# Odoo 18 Community + PostgreSQL 16 for the demo.
+#
+#   ./scripts/init_db.sh        create the "demo" database (first time only)
+#   python scripts/seed.py      add the purchasing scenarios
+#   ./scripts/snapshot_db.sh    save the state replays reset to
+#   ./scripts/restore_db.sh     reset to the snapshot (use as --pre-hook)
+#
+# Odoo 18 supports PostgreSQL 12+; 16 is a current, well-supported choice and
+# is needed for `dropdb --force` (13+), which the restore script uses.
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: odoo
+      POSTGRES_DB: postgres
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  odoo:
+    image: odoo:18
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8069:8069"
+    environment:
+      HOST: db
+      USER: odoo
+      PASSWORD: odoo
+    # Pin Odoo to the demo database: the browser goes straight to it, and
+    # background jobs never open connections to the snapshot (which would
+    # block `createdb -T demo_snapshot`).
+    command: ["--database=demo", "--db-filter=^demo$$"]
+    volumes:
+      - odoo-data:/var/lib/odoo          # filestore (attachments) and sessions
+      - ./addons:/mnt/extra-addons       # custom modules; builder_agent writes here
+
+volumes:
+  db-data:
+  odoo-data:

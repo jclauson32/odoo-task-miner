@@ -1,0 +1,62 @@
+{
+  "title": "Approve vendor bill with price variance",
+  "steps": [
+    { "type": "setViewport", "width": 1440, "height": 900, "deviceScaleFactor": 1, "isMobile": false, "hasTouch": false, "isLandscape": false },
+    {
+      "type": "navigate",
+      "url": "http://localhost:8069/web#action=245&model=account.move&view_type=list&menu_id=115",
+      "assertedEvents": [{ "type": "navigation", "url": "http://localhost:8069/web#action=245&model=account.move&view_type=list&menu_id=115", "title": "Bills" }]
+    },
+    {
+      "type": "click",
+      "target": "main",
+      "selectors": [["aria/BILL/2026/10/0042"], ["tr.o_data_row:nth-of-type(3) > td.o_data_cell"], ["xpath///tr[3]/td[2]"], ["text/BILL/2026/10/0042"]],
+      "offsetX": 40, "offsetY": 12,
+      "assertedEvents": [{ "type": "navigation", "url": "http://localhost:8069/web#id=1042&action=245&model=account.move&view_type=form&menu_id=115" }]
+    },
+    {
+      "type": "click",
+      "target": "main",
+      "selectors": [["div.o_notebook a[name='other_tab']"], ["text/Other Info"]],
+      "offsetX": 20, "offsetY": 8
+    },
+    {
+      "type": "click",
+      "target": "main",
+      "selectors": [["aria/Purchase Order"], ["div[name='purchase_id'] a.o_form_uri"]],
+      "offsetX": 15, "offsetY": 6,
+      "assertedEvents": [{ "type": "navigation", "url": "http://localhost:8069/odoo/action-388/77" }]
+    },
+    {
+      "type": "click",
+      "target": "main",
+      "selectors": [["button[name='action_view_picking']"], ["aria/Receipt"]],
+      "offsetX": 10, "offsetY": 10,
+      "assertedEvents": [{ "type": "navigation", "url": "http://localhost:8069/odoo/stock.picking/311" }]
+    },
+    {
+      "type": "navigate",
+      "url": "http://localhost:8069/web#id=1042&action=245&model=account.move&view_type=form&menu_id=115"
+    },
+    {
+      "type": "click",
+      "target": "main",
+      "selectors": [["div[name='invoice_line_ids'] td[name='price_unit']"]],
+      "offsetX": 30, "offsetY": 9
+    },
+    {
+      "type": "change",
+      "target": "main",
+      "selectors": [["div[name='price_unit'] input"]],
+      "value": "2.15"
+    },
+    { "type": "keyDown", "target": "main", "key": "Enter" },
+    { "type": "keyUp", "target": "main", "key": "Enter" },
+    {
+      "type": "click",
+      "target": "main",
+      "selectors": [["aria/Confirm"], ["button[name=\"action_post\"]"], ["text/Confirm"]],
+      "offsetX": 25, "offsetY": 14
+    }
+  ]
+}

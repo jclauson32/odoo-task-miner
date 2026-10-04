@@ -1,0 +1,15 @@
+{
+  "name": "odoo-miner-replay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Replays a Chrome Recorder export with Puppeteer and captures Odoo backend calls per step.",
+  "main": "capture.mjs",
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "dependencies": {
+    "@puppeteer/replay": "^4.0.2",
+    "puppeteer": "^25.12.0"
+  }
+}

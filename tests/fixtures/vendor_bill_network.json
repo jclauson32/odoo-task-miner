@@ -1,0 +1,18 @@
+{
+  "schema_version": "1",
+  "recording": "tests/fixtures/vendor_bill.json",
+  "started_at": "2026-10-04T22:00:00Z",
+  "completed": true,
+  "failed_step": null,
+  "error": null,
+  "calls": [
+    { "step_index": -1, "timestamp_ms": 1000, "endpoint": "/web/dataset/call_kw/res.users/has_group", "model": "res.users", "method": "has_group", "args": ["base.group_user"], "kwargs": {}, "status": 200, "rpc_error": null },
+    { "step_index": 1, "timestamp_ms": 1100, "endpoint": "/web/action/load", "model": null, "method": "action_load", "args": null, "kwargs": {"action_id": 245}, "status": 200, "rpc_error": null },
+    { "step_index": 1, "timestamp_ms": 1200, "endpoint": "/web/dataset/call_kw/account.move/web_search_read", "model": "account.move", "method": "web_search_read", "args": [], "kwargs": {"domain": [["move_type", "=", "in_invoice"]]}, "status": 200, "rpc_error": null },
+    { "step_index": 2, "timestamp_ms": 2000, "endpoint": "/web/dataset/call_kw/account.move/web_read", "model": "account.move", "method": "web_read", "args": [[1042]], "kwargs": {}, "status": 200, "rpc_error": null },
+    { "step_index": 8, "timestamp_ms": 5000, "endpoint": "/web/dataset/call_kw/account.move/onchange", "model": "account.move", "method": "onchange", "args": [[1042]], "kwargs": {}, "status": 200, "rpc_error": null },
+    { "step_index": 11, "timestamp_ms": 6000, "endpoint": "/web/dataset/call_kw/account.move/web_save", "model": "account.move", "method": "web_save", "args": [[1042], {}], "kwargs": {}, "status": 200, "rpc_error": null },
+    { "step_index": 11, "timestamp_ms": 6100, "endpoint": "/web/dataset/call_button/account.move/action_post", "model": "account.move", "method": "action_post", "args": [[1042]], "kwargs": {}, "status": 200, "rpc_error": null },
+    { "step_index": 11, "timestamp_ms": 6200, "endpoint": "/web/dataset/call_kw/account.move/x_custom_thing", "model": "account.move", "method": "x_custom_thing", "args": [], "kwargs": {}, "status": 200, "rpc_error": null }
+  ]
+}

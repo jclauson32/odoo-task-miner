@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "odoo-miner"
+version = "0.1.0"
+description = "Turn Chrome DevTools Recorder sessions of Odoo workflows into structured click and backend-call data for analysis agents."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.6",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+odoo-miner = "odoo_miner.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/odoo_miner"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -278,6 +278,18 @@ def test_show_renders_assessment_and_plan(tmp_path):
     assert "check by hand" in r.output
 
 
+def test_show_renders_a_build(tmp_path):
+    build = tmp_path / "build.json"
+    build.write_text(json.dumps({
+        "branch": "feat/demo_mod", "pr_url": "https://github.com/o/r/pull/2",
+        "tests_passed": True, "replay_completed": True,
+        "effort_before": 80, "effort_after": 40, "email_sent": False,
+    }))
+    r = _show(build)
+    assert r.exit_code == 0, r.output
+    assert "80 → 40 (-50%)" in r.output and "feat/demo_mod" in r.output and "pull/2" in r.output
+
+
 # --- secrets ---------------------------------------------------------------------
 
 

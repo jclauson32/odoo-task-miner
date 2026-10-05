@@ -231,7 +231,7 @@ def show(
     first: int | None = typer.Option(None, "--from", help="First step number to show."),
     last: int | None = typer.Option(None, "--to", help="Last step number to show."),
 ):
-    """Print any pipeline file as a table: clicks, session, segments, traces, assessment or plan."""
+    """Print any pipeline file as a table: clicks, session, segments, traces, assessment, plan or build."""
     data = json.loads(path.read_text(encoding="utf-8"))
     for looks_like, render in _ARTIFACT_VIEWS:
         if looks_like(data):
@@ -621,6 +621,28 @@ def _show_plan(data: dict, path: Path) -> None:
     _show_citation_check(data.get("unverified_citations") or [])
 
 
+def _show_build(data: dict, path: Path) -> None:
+    def status(ok: bool, good: str, bad: str) -> str:
+        return f"[green]{good}[/green]" if ok else f"[red]{bad}[/red]"
+
+    before, after = data.get("effort_before", 0), data.get("effort_after", 0)
+    change = f" ({(after - before) / before:+.0%})" if before else ""
+    table = Table(title=f"Build - {path}", show_header=False)
+    table.add_column(style="bold")
+    table.add_column(overflow="fold")
+    for label, value in [
+        ("Module tests", status(data.get("tests_passed", False), "passed", "not passing")),
+        ("Replay with the change", status(data.get("replay_completed", False), "completed", "did not complete")),
+        ("Effort", f"{before:g} → {after:g}{change}"),
+        ("Branch", escape(data.get("branch") or "-")),
+        ("Commit", escape(data.get("commit") or "-")),
+        ("Pull request", escape(data.get("pr_url") or "-")),
+        ("Report emailed", "yes" if data.get("email_sent") else "no"),
+    ]:
+        table.add_row(label, value)
+    console.print(table)
+
+
 def _is_segments(data: dict) -> bool:
     first = (data.get("segments") or [{}])[0]
     return "step_indexes" in first
@@ -633,6 +655,7 @@ def _is_traces(data: dict) -> bool:
 
 _ARTIFACT_VIEWS = [
     (lambda d: "decision" in d and "summary" in d, _show_plan),
+    (lambda d: "tests_passed" in d and "effort_before" in d, _show_build),
     (lambda d: "total_effort" in d, _show_assessment),
     (_is_traces, _show_traces),
     (_is_segments, _show_segments),

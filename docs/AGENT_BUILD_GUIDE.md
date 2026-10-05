@@ -126,9 +126,12 @@ session.json  segments.json  traces.json  assessment.json  plan.json  plan.md  b
 
 ## 4. Setup (milestone M0)
 
+`deepagents` requires Python >= 3.11, so `requires-python` is `>=3.11`.
+
 ```bash
 pip install "langchain==1.4.3" "langgraph==1.2.12" "deepagents==0.7.21" \
-            "langsmith==0.14.4" "langchain-anthropic==1.7.5" python-dotenv
+            "langsmith==0.14.4" "langchain-anthropic==1.7.5" python-dotenv \
+            langgraph-checkpoint-sqlite
 pip install -U "langgraph-cli[inmem]"     # optional: local Studio UI
 git clone --depth 1 -b 18.0 https://github.com/odoo/odoo vendor/odoo   # source for the agents to read
 echo "vendor/" >> .gitignore
@@ -143,8 +146,8 @@ ANTHROPIC_API_KEY=
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=odoo-miner
-ODOO_MINER_MODEL=anthropic:claude-sonnet-5-5
-ODOO_MINER_FAST_MODEL=anthropic:claude-haiku-4-5-20251001
+ODOO_MINER_MODEL=anthropic:claude-sonnet-5
+ODOO_MINER_FAST_MODEL=anthropic:claude-haiku-4-5
 ODOO_SOURCE=vendor/odoo
 ```
 
@@ -348,7 +351,7 @@ confirm links to `account.move.action_post`, and every `CodeRef` file:line exist
 | `screen_change` | `action_load` call, or `web_read` on a different model than the previous step |
 | `modal` | target inside a dialog (`dialog_` in selectors) or a wizard model opened (`get_views` on a `*.wizard`/`account.payment.register`) |
 | `error` | any `rpc_error` in the step's calls |
-| `backtrack` | returns to a model/record visited earlier in the same segment |
+| `backtrack` | returns to a model/record visited earlier **in the same segment** (scoped per segment: crossing into a new segment is the next task, not a backtrack) |
 | `hidden_field` | field the user edited sits in a notebook page or under `invisible=` in the form view (look up in view XML via `find_view_fields`) |
 | `wasted_click` | click with no calls and no following `change` (e.g. clicking a heading) |
 
@@ -358,7 +361,12 @@ Score = clamp(1 + Σ weight × signal, 1, 5). Segment effort = sum of step score
 the computed signals and scores, may adjust any step score by at most ±1 with a
 reason, and writes `rationale` and `friction`. Enforce the ±1 limit in code.
 
-**CLI:** `odoo-miner assess out/<run>/traces.json --session out/<run>/session.json -o out/<run>/assessment.json`
+**CLI:** `odoo-miner assess out/<run>/segments.json --session out/<run>/session.json -o out/<run>/assessment.json`
+
+Scoring needs each segment's `step_indexes`, which only `segments.json` carries
+(`traces.json` has `segment_id` but not the steps). Passing `traces.json` works -
+the command resolves `segments.json` beside it. `--offline` skips the model call,
+so the deterministic scores can be produced without an API key.
 
 **Done when:** scores are identical across two runs before the LLM step, and the
 bill segment shows `error` and `modal` friction.

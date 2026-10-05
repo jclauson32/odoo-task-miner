@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "odoo_miner": "src/odoo_miner/pipeline/graph.py:graph"
+  },
+  "env": ".env"
+}

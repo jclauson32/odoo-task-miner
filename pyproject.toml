@@ -7,11 +7,18 @@ name = "odoo-miner"
 version = "0.1.0"
 description = "Turn Chrome DevTools Recorder sessions of Odoo workflows into structured click and backend-call data for analysis agents."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "typer>=0.12",
     "pydantic>=2.6",
     "rich>=13",
+    "langchain==1.4.3",
+    "langgraph==1.2.12",
+    "langgraph-checkpoint-sqlite>=2.0",
+    "deepagents==0.7.21",
+    "langsmith==0.14.4",
+    "langchain-anthropic==1.7.5",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

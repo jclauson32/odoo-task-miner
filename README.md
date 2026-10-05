@@ -51,12 +51,14 @@ project: `git clone --depth 1 -b 18.0 https://github.com/odoo/odoo`.
 ### 2. The CLI and replay
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
+uv sync --extra dev          # or: python -m venv .venv && pip install -e '.[dev]'
 
 # Replay needs Node 18+ and downloads Chrome on first install
 cd replay && npm install && cd ..
 ```
+
+Python 3.11 or newer. Run commands with `uv run odoo-miner ...`, or activate
+the environment with `source .venv/bin/activate`.
 
 ## Usage
 
@@ -92,6 +94,49 @@ only, with no backend calls.
 
 Schemas live in `src/odoo_miner/models.py`; every stage reads and writes these,
 so a stage can be inspected or re-run on its own.
+
+## Analysis stages
+
+On top of `session.json`, a pipeline of agents finds the friction and plans a
+fix. Each stage reads one file and writes one file, has a CLI subcommand, and
+is a node in the same LangGraph pipeline. See `docs/AGENT_BUILD_GUIDE.md`.
+
+```bash
+odoo-miner segment out/run/session.json -o out/run/segments.json
+odoo-miner trace   out/run/segments.json --session out/run/session.json -o out/run/traces.json
+odoo-miner assess  out/run/segments.json --session out/run/session.json -o out/run/assessment.json
+odoo-miner plan    out/run
+```
+
+Or run them as one resumable, traced pipeline:
+
+```bash
+odoo-miner analyze out/run                      # the whole thing
+odoo-miner analyze out/run --until assess       # stop before planning
+odoo-miner analyze out/run --approve --thread run   # answer the approval gate
+```
+
+| File | Model | Contents |
+|---|---|---|
+| `segments.json` | `SegmentLog` | Steps grouped into one-thing-each segments, each labelled in business language, with the record it touched and whether it completed, failed or recovered. |
+| `traces.json` | `TraceLog` | Per segment: retrieval / action / navigation / mixed, the Odoo methods that ran (`file:line`, override chain included), the data looked up, and a plain-language explanation. |
+| `assessment.json` | `Assessment` | A 1-5 difficulty score per step from signals detected in code (typing, lookup, tab switch, screen change, modal, error, backtrack, hidden field, wasted click), plus effort and friction per segment. |
+| `plan.json` / `plan.md` | `Plan` | Whether to change anything - no change, data fix, configuration or a new module - with the views and methods to extend, what it saves, acceptance criteria and risks. |
+| `build.json` | `BuildResult` | The branch and commit, whether tests passed, whether the replay completed, and effort before against after. |
+
+These stages call a model, so they need `ANTHROPIC_API_KEY` in `.env` (copy
+`.env.example`). Two exceptions run offline: `assess --offline` produces the
+deterministic scores with no model call, and `python evals/run_evals.py check`
+scores the evaluators themselves. `pytest` never needs a key.
+
+The agents read Odoo's source to explain what the backend did, so clone it
+next to the project:
+
+```bash
+git clone --depth 1 -b 18.0 https://github.com/odoo/odoo vendor/odoo
+```
+
+Without it the stages still run; they just cannot resolve code references.
 
 ## Things to know
 

@@ -1,0 +1,102 @@
+{
+  "contract_version": "1",
+  "session": "tests/fixtures/rfq_to_payment.json",
+  "segments": [
+    {
+      "segment_id": "s01",
+      "step_indexes": [1, 2, 3, 5, 6],
+      "label": "Log in to Odoo",
+      "intent": "log in",
+      "record": null,
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s02",
+      "step_indexes": [8, 9],
+      "label": "Open the Purchase app",
+      "intent": "navigate to purchase orders",
+      "record": {"model": "purchase.order", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s03",
+      "step_indexes": [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21],
+      "label": "Create RFQ for Apex Guidewire Supply with 13 coating kits",
+      "intent": "create purchase order",
+      "record": {"model": "purchase.order", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s04",
+      "step_indexes": [22, 23, 24, 25],
+      "label": "Add PTFE liner line to the RFQ",
+      "intent": "add order line",
+      "record": {"model": "purchase.order", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s05",
+      "step_indexes": [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36],
+      "label": "Open the coating kit product and set its price to 12.50",
+      "intent": "update product price",
+      "record": {"model": "product.product", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s06",
+      "step_indexes": [37, 38, 39, 40, 41, 42, 43],
+      "label": "Open the PTFE liner product and set its price to 3.20",
+      "intent": "update product price",
+      "record": {"model": "product.product", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s07",
+      "step_indexes": [44, 45],
+      "label": "Confirm the purchase order",
+      "intent": "confirm purchase order",
+      "record": {"model": "purchase.order", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s08",
+      "step_indexes": [46, 47, 48],
+      "label": "Receive the goods and validate the transfer",
+      "intent": "validate receipt",
+      "record": {"model": "stock.picking", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s09",
+      "step_indexes": [49],
+      "label": "Create the vendor bill from the purchase order",
+      "intent": "create vendor bill",
+      "record": {"model": "account.move", "record_id": null},
+      "outcome": "completed"
+    },
+    {
+      "segment_id": "s10",
+      "step_indexes": [50, 51],
+      "label": "Confirm the bill and hit the missing bill date error",
+      "intent": "confirm vendor bill",
+      "record": {"model": "account.move", "record_id": null},
+      "outcome": "failed"
+    },
+    {
+      "segment_id": "s11",
+      "step_indexes": [52, 53, 54],
+      "label": "Set the bill date and confirm the bill",
+      "intent": "confirm vendor bill",
+      "record": {"model": "account.move", "record_id": null},
+      "outcome": "recovered"
+    },
+    {
+      "segment_id": "s12",
+      "step_indexes": [55, 56, 57],
+      "label": "Register payment for the bill",
+      "intent": "register payment",
+      "record": {"model": "account.payment.register", "record_id": null},
+      "outcome": "completed"
+    }
+  ]
+}

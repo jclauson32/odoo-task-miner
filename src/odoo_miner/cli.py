@@ -233,5 +233,179 @@ def show(path: Path = typer.Argument(..., help="clicks.json or session.json")):
     console.print(table)
 
 
+
+# ---------------------------------------------------------------- analysis stages
+#
+# Each of these is also a node in the LangGraph pipeline (see
+# odoo_miner/pipeline/graph.py); the function underneath is the same one. The
+# agent libraries are imported inside the commands so that `ingest`, `replay`
+# and `merge` stay fast and keep working without them.
+
+
+def _session_arg(path: Path) -> Path:
+    if not path.exists():
+        _fail(f"{path} not found. Run `odoo-miner run` first.")
+    return path
+
+
+def _resolve_segments(path: Path) -> Path:
+    """Accept segments.json, or traces.json and find segments.json beside it.
+
+    Scoring needs each segment's step indexes, which only segments.json
+    carries, so a traces.json argument is resolved to its sibling.
+    """
+    if path.name == "traces.json":
+        sibling = path.with_name("segments.json")
+        if not sibling.exists():
+            _fail(f"{path} has no segments.json beside it; run `odoo-miner segment` first.")
+        return sibling
+    return path
+
+
+@app.command()
+def segment(
+    session: Path = typer.Argument(..., help="Output of `run`/`merge` (session.json)."),
+    out: Path = typer.Option(Path("segments.json"), "--out", "-o"),
+    run_name: str = typer.Option("adhoc", "--run", help="Run name, used in LangSmith metadata."),
+):
+    """Group a session's clicks into segments that each accomplish one thing."""
+    from .agents.segmenter import run_segmenter_path
+
+    log = run_segmenter_path(_session_arg(session), out, run=run_name)
+    console.print(f"[green]✓[/green] {len(log.segments)} segments → {out}")
+    for seg in log.segments:
+        console.print(f"  {seg.segment_id} [{seg.outcome}] {escape(seg.label)}")
+
+
+@app.command()
+def trace(
+    segments: Path = typer.Argument(..., help="Output of `segment`."),
+    session: Path = typer.Option(..., "--session", help="session.json for the same run."),
+    out: Path = typer.Option(Path("traces.json"), "--out", "-o"),
+    run_name: str = typer.Option("adhoc", "--run"),
+):
+    """Explain each segment against the Odoo code that ran."""
+    from .agents.tracer import run_tracer_path
+
+    log = run_tracer_path(segments, _session_arg(session), out, run=run_name)
+    console.print(f"[green]✓[/green] {len(log.segments)} segments traced → {out}")
+    for seg in log.segments:
+        console.print(f"  {seg.segment_id} [{seg.kind}] {len(seg.actions)} action(s), {len(seg.retrievals)} lookup(s)")
+
+
+@app.command()
+def assess(
+    segments: Path = typer.Argument(..., help="Output of `segment` (or `trace`; segments.json is found beside it)."),
+    session: Path = typer.Option(..., "--session", help="session.json for the same run."),
+    out: Path = typer.Option(Path("assessment.json"), "--out", "-o"),
+    offline: bool = typer.Option(
+        False, help="Deterministic scores only; no model call, so no API key needed."
+    ),
+    run_name: str = typer.Option("adhoc", "--run"),
+):
+    """Score how hard each step and segment was."""
+    from .agents.assessor import run_assessor_path
+
+    assessment = run_assessor_path(
+        _resolve_segments(segments), _session_arg(session), out,
+        run=run_name, explain=not offline,
+    )
+    console.print(
+        f"[green]✓[/green] total effort {assessment.total_effort:g} "
+        f"over {len(assessment.segments)} segments → {out}"
+    )
+    for seg in assessment.segments:
+        friction = f"  [yellow]{escape('; '.join(seg.friction))}[/yellow]" if seg.friction else ""
+        console.print(f"  {seg.segment_id} effort {seg.effort:g}{friction}")
+
+
+@app.command()
+def plan(
+    run_dir: Path = typer.Argument(..., help="Run folder holding segments/traces/assessment."),
+    out: Optional[Path] = typer.Option(None, "--out", "-o"),
+    run_name: str = typer.Option("adhoc", "--run"),
+):
+    """Decide whether the workflow is worth changing, and plan the change."""
+    from .agents.planner import run_planner_path
+
+    target = out or run_dir / "plan.json"
+    result = run_planner_path(run_dir, target, run=run_name)
+    console.print(f"[green]✓[/green] decision: [bold]{result.decision}[/bold] → {target}")
+    console.print(escape(result.summary))
+
+
+@app.command()
+def analyze(
+    run_dir: Path = typer.Argument(..., help="Run folder containing session.json."),
+    until: Optional[str] = typer.Option(
+        None, "--until", help="Stop after this stage: segment, trace, assess, plan, approve, build."
+    ),
+    run_name: Optional[str] = typer.Option(None, "--run", help="Defaults to the run folder's name."),
+    thread: Optional[str] = typer.Option(None, "--thread", help="Resume a run by thread id."),
+    approve: Optional[bool] = typer.Option(
+        None, "--approve/--reject", help="Answer a pending approval and continue."
+    ),
+    notes: str = typer.Option("", "--notes", help="Notes to record with the approval."),
+):
+    """Run the stages as one LangGraph pipeline, resumable and traced as one tree."""
+    from langgraph.types import Command
+
+    from .pipeline.graph import build_graph, sqlite_checkpointer
+    from .pipeline.state import STAGES
+
+    if until is not None and until not in STAGES:
+        _fail(f"Unknown stage {until!r}; expected one of {', '.join(STAGES)}.")
+
+    session = run_dir / "session.json"
+    _session_arg(session)
+    name = run_name or run_dir.name
+    thread_id = thread or name
+
+    with sqlite_checkpointer(run_dir / "pipeline.sqlite") as checkpointer:
+        graph = build_graph(checkpointer=checkpointer, until=until)
+        config = {"configurable": {"thread_id": thread_id}}
+
+        if approve is None:
+            state = {
+                "run": name,
+                "run_dir": str(run_dir),
+                "session_path": str(session),
+            }
+            result = graph.invoke(state, config=config)
+        else:
+            result = graph.invoke(
+                Command(resume={"approved": approve, "notes": notes}), config=config
+            )
+
+    pending = result.get("__interrupt__")
+    if pending:
+        payload = pending[0].value if hasattr(pending[0], "value") else pending[0]
+        console.print("\n[yellow]Waiting for approval.[/yellow]")
+        for key in ("decision", "plan_summary", "module_name", "plan_md"):
+            if payload.get(key) is not None:
+                console.print(f"  {key}: {escape(str(payload[key]))}")
+        for key in ("acceptance_criteria", "risks"):
+            for item in payload.get(key) or []:
+                console.print(f"  {key[:-1]}: {escape(str(item))}")
+        console.print(
+            f"\nApprove with:  odoo-miner analyze {run_dir} --approve "
+            f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} --reject "
+            f"--thread {thread_id}"
+        )
+        return
+
+    written = [
+        (label, result[key]) for label, key in [
+            ("segments", "segments_path"), ("traces", "traces_path"),
+            ("assessment", "assessment_path"), ("plan", "plan_path"),
+            ("build", "build_path"),
+        ] if result.get(key)
+    ]
+    console.print(f"[green]✓[/green] pipeline finished ({len(written)} artifact(s))")
+    for label, path in written:
+        console.print(f"  {label}: {path}")
+    for problem in result.get("errors") or []:
+        err.print(f"[yellow]{escape(problem)}[/yellow]")
+
 if __name__ == "__main__":
     app()

@@ -1,0 +1,213 @@
+"""tracer_agent: link each segment to the backend code that ran.
+
+The read/write split is already computed by `merge`. What is left is locating
+and explaining backend code, which is tool use in a loop - so the
+deterministic resolver below does the finding, and the agent reads the code
+and writes the explanation.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Optional
+
+from ..models import NetworkCall, Session, SessionClick
+from .config import load_prompt, model_for, trace_config
+from .contracts import CodeRef, QueryRef, SegmentKind, SegmentLog, TracedSegment, TraceLog
+from .tools import odoo_source
+
+# Calls the framework makes on its own; not something the user looked up.
+FRAMEWORK_METHODS = {
+    "get_views", "load_views", "fields_get", "default_get", "has_group",
+    "check_access_rights", "web_override_translations", "read_progress_bar",
+    "get_formview_action", "get_formview_id",
+}
+# Methods that are a lookup the user actually performed.
+RETRIEVAL_METHODS = {
+    "name_search", "web_name_search", "web_search_read", "search_read",
+    "web_read", "read", "search", "search_count", "read_group", "web_read_group",
+}
+
+
+def segment_clicks(session: Session, step_indexes: list[int]) -> list[SessionClick]:
+    wanted = set(step_indexes)
+    return [c for c in session.clicks if c.step_index in wanted]
+
+
+def classify_segment(clicks: list[SessionClick]) -> SegmentKind:
+    """First-pass kind from the calls alone. The agent may correct it."""
+    kinds = {call.kind for click in clicks for call in click.calls}
+    wrote = "write" in kinds
+    read = bool(kinds & {"read", "compute"})
+    moved = "action_load" in kinds
+
+    if wrote and read:
+        return "mixed"
+    if wrote:
+        return "action"
+    if read:
+        return "retrieval"
+    if moved:
+        return "navigation"
+    return "navigation"
+
+
+def retrievals_for(clicks: list[SessionClick]) -> list[QueryRef]:
+    """Lookups the user needed, straight from the captured calls."""
+    out: list[QueryRef] = []
+    seen: set[tuple] = set()
+
+    for click in clicks:
+        for call in click.calls:
+            method, model = call.method or "", call.model
+            if not model or method in FRAMEWORK_METHODS:
+                continue
+            if method not in RETRIEVAL_METHODS:
+                continue
+            kwargs = call.kwargs or {}
+            domain = kwargs.get("domain") or _first_list(call.args)
+            spec = kwargs.get("specification") or kwargs.get("fields")
+            fields = sorted(spec) if isinstance(spec, dict) else (
+                list(spec) if isinstance(spec, list) else None
+            )
+            key = (model, method, repr(domain)[:200])
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(QueryRef(model=model, method=method, domain=domain, fields=fields))
+    return out
+
+
+def _first_list(args: Optional[list]) -> Optional[list]:
+    if not args:
+        return None
+    for arg in args:
+        if isinstance(arg, list):
+            return arg
+    return None
+
+
+def action_calls(clicks: list[SessionClick]) -> list[NetworkCall]:
+    """The calls that changed data."""
+    return [c for click in clicks for c in click.calls if c.kind == "write"]
+
+
+def resolve_actions(clicks: list[SessionClick]) -> list[CodeRef]:
+    """Code behind each write call, by searching the Odoo source.
+
+    Returns an empty list when the source checkout is missing, so the stage
+    still runs - the agent is told the references could not be resolved.
+    """
+    if not odoo_source.source_available():
+        return []
+
+    refs: list[CodeRef] = []
+    seen: set[tuple] = set()
+    for call in action_calls(clicks):
+        if not call.model or not call.method:
+            continue
+        for ref in odoo_source.find_method(call.model, call.method):
+            key = (ref.file, ref.line)
+            if key not in seen:
+                seen.add(key)
+                refs.append(ref)
+    return refs
+
+
+def verify_refs(refs: list[CodeRef]) -> tuple[list[CodeRef], list[CodeRef]]:
+    """Split references into those that exist on disk and those that do not."""
+    if not odoo_source.source_available():
+        return [], list(refs)
+    root = odoo_source.settings().odoo_source_abs
+    good, bad = [], []
+    for ref in refs:
+        path = root / ref.file
+        if path.is_file() and ref.line >= 1:
+            good.append(ref)
+        else:
+            bad.append(ref)
+    return good, bad
+
+
+def render_segment(segment, clicks: list[SessionClick], refs: list[CodeRef], queries: list[QueryRef]) -> str:
+    """What the agent is given for one segment."""
+    lines = [
+        f"Segment {segment.segment_id}: {segment.label}",
+        f"Intent: {segment.intent}   Outcome: {segment.outcome}",
+        f"Pre-computed kind: {classify_segment(clicks)}",
+        "",
+        "Steps:",
+    ]
+    for click in clicks:
+        target = (click.target.aria_label or click.target.text or click.target.button_name
+                  or click.target.css or "") if click.target else (click.url or "")
+        calls = ", ".join(
+            f"{c.kind} {c.model or '-'}.{c.method or '-'}" for c in click.calls
+        ) or "-"
+        lines.append(f"  {click.step_index:>3} {click.type:<11} \"{target[:44]}\" | {calls[:130]}")
+        for call in click.calls:
+            if call.rpc_error:
+                lines.append(f"      error: {call.rpc_error[:160]}")
+
+    lines += ["", "Code references already resolved (verify and extend):"]
+    lines += [f"  {r.module}  {r.file}:{r.line}  {r.symbol}" for r in refs] or ["  (none)"]
+    if not odoo_source.source_available():
+        lines.append("  NOTE: the Odoo source checkout is missing, so none could be resolved.")
+
+    lines += ["", "Retrieval queries extracted from the calls:"]
+    lines += [
+        f"  {q.model}.{q.method} domain={q.domain!r} fields={(q.fields or [])[:6]}"
+        for q in queries
+    ] or ["  (none)"]
+    return "\n".join(lines)
+
+
+def build_tracer(model: Optional[str] = None):
+    """The LangChain agent, with the source-search tools."""
+    from langchain.agents import create_agent
+
+    return create_agent(
+        model=model or model_for("tracer"),
+        tools=odoo_source.TOOLS,
+        system_prompt=load_prompt("tracer"),
+        response_format=TracedSegment,
+        name="tracer_agent",
+    )
+
+
+def trace_segment(segment, session: Session, agent: Any = None, run: str = "adhoc") -> TracedSegment:
+    """Trace one segment. Segments are independent, so this can be fanned out."""
+    agent = agent or build_tracer()
+    clicks = segment_clicks(session, segment.step_indexes)
+    refs, _ = verify_refs(resolve_actions(clicks))
+    queries = retrievals_for(clicks)
+
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": render_segment(segment, clicks, refs, queries)}]},
+        config=trace_config(run, "tracer", segment=segment.segment_id),
+    )
+    traced = result["structured_response"]
+    if not isinstance(traced, TracedSegment):
+        traced = TracedSegment.model_validate(traced)
+
+    # The agent may correct the kind and the explanation, but references it
+    # invented are dropped: a CodeRef has to exist on disk.
+    good, _bad = verify_refs(traced.actions)
+    return traced.model_copy(update={"segment_id": segment.segment_id, "actions": good or refs})
+
+
+def run_tracer(segments: SegmentLog, session: Session, agent: Any = None, run: str = "adhoc") -> TraceLog:
+    agent = agent or build_tracer()
+    traced = [trace_segment(s, session, agent=agent, run=run) for s in segments.segments]
+    return TraceLog(session=session.source, segments=traced)
+
+
+def run_tracer_path(
+    segments_path: Path, session_path: Path, out: Path, agent: Any = None, run: str = "adhoc"
+) -> TraceLog:
+    segments = SegmentLog.model_validate_json(Path(segments_path).read_text(encoding="utf-8"))
+    session = Session.model_validate_json(Path(session_path).read_text(encoding="utf-8"))
+    log = run_tracer(segments, session, agent=agent, run=run)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(log.model_dump_json(indent=2), encoding="utf-8")
+    return log

@@ -25,13 +25,16 @@ deliver it.
      change and passes with it. Add an `HttpCase` tour if the UI changed.
 3. `install_module` then `run_module_tests`. Fix what breaks and run again.
    Do not move on while tests fail.
-4. Write `/run/after_recording.json`: start from `/run/recording.json`, keep
-   every step as it is, and remove only the steps your change makes
-   unnecessary - typically the clicks that went to another screen to look
-   something up that your change now shows in place, and the clicks that came
-   back. Do not invent new selectors; a step you keep must be copied
-   unchanged. Then `replay_workflow`. If it stops, read the failure screenshot
-   it names, fix the recording or the module, and retry.
+4. Write `/run/after_recording.json`: the same workflow done with your
+   change. Start from `/run/recording.json` and remove the steps your change
+   makes unnecessary - the trips to other screens to look something up, the
+   clicks back, the values retyped, the notes written by hand. Copy every step
+   you keep exactly as it is. If your change adds something the user now
+   clicks - a button, say - add that step, targeting it only by what your
+   module defines: `button[name=<your method>]` for a button. Never invent a
+   selector for anything Odoo already had. Then `replay_workflow`. If it
+   stops, read the failure screenshot it names, fix the recording or the
+   module, and retry.
 5. `measure_effort` on the after-run. Compare to the effort before. If effort
    did not drop, say so - that is a real result, not a failure to hide.
 6. Only then deliver, in this order - each one pauses for a person, so

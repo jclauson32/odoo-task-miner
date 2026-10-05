@@ -46,8 +46,11 @@ def record(action: str, outcome: str, **details: Any) -> None:
         "actor": actor(),
         "action": action,
         "outcome": outcome,
+        # The run this happened in, so one run's trail can be read on its own.
+        "run": os.environ.get("ODOO_MINER_RUN") or None,
         **{key: value for key, value in details.items() if value is not None},
     }
+    entry = {key: value for key, value in entry.items() if value is not None}
     path = audit_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

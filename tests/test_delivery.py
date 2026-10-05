@@ -669,3 +669,19 @@ def test_before_and_after_screenshots_get_distinct_names(smtp_server, tmp_path):
     names = [part.get_filename() for part in message.iter_attachments()]
     assert names == ["run-screenshots-step-006.png", "after-screenshots-step-006.png"], names
     assert "run-screenshots-step-006.png" in result
+
+
+def test_audit_entries_carry_the_run_and_the_command_filters_by_it(monkeypatch):
+    from typer.testing import CliRunner
+
+    from odoo_miner.cli import app
+
+    monkeypatch.setenv("ODOO_MINER_RUN", "bills")
+    audit.record("approve_plan", "approved", notes="looks right")
+    monkeypatch.setenv("ODOO_MINER_RUN", "other")
+    audit.record("approve_plan", "rejected", notes="not this one")
+
+    assert [e["run"] for e in audit.read()] == ["bills", "other"]
+    result = CliRunner().invoke(app, ["audit", "--run", "bills"], env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.output
+    assert "looks right" in result.output and "not this one" not in result.output

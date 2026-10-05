@@ -449,6 +449,7 @@ def analyze(
     _session_arg(session)
     name = run_name or run_dir.name
     thread_id = thread or name
+    os.environ["ODOO_MINER_RUN"] = name       # audit entries carry the run
 
     with sqlite_checkpointer(run_dir / "pipeline.sqlite") as checkpointer:
         graph = build_graph(checkpointer=checkpointer, until=until)
@@ -543,6 +544,7 @@ def report(
     from .agents.tools.delivery import send_report_email
 
     settings()
+    os.environ["ODOO_MINER_RUN"] = run_dir.name       # audit entries carry the run
     try:
         subject, body, attachments = compose_report(run_dir)
     except FileNotFoundError as exc:
@@ -632,6 +634,34 @@ _ARTIFACT_VIEWS = [
     (_is_traces, _show_traces),
     (_is_segments, _show_segments),
 ]
+
+
+@app.command()
+def audit(
+    run_name: str | None = typer.Option(None, "--run", help="Only this run's entries."),
+    last: int = typer.Option(20, "--last", help="How many of the most recent entries to show."),
+):
+    """Show the audit log: who approved or rejected what, and what was sent out."""
+    from .agents.audit import audit_path, read
+
+    entries = [e for e in read() if run_name is None or e.get("run") == run_name][-last:]
+    if not entries:
+        console.print(f"No audit entries{f' for run {run_name!r}' if run_name else ''} in {audit_path()}.")
+        return
+    table = Table(title=f"Audit log - {audit_path()}")
+    for column in ("When (UTC)", "Run", "Action", "Outcome", "Detail"):
+        table.add_column(column, overflow="fold")
+    colors = {"approved": "green", "ok": "green", "rejected": "yellow", "refused": "red"}
+    for entry in entries:
+        outcome = entry.get("outcome", "")
+        color = colors.get(outcome, "white")
+        detail = entry.get("notes") or entry.get("result") or entry.get("decision") or ""
+        table.add_row(
+            entry.get("at", "")[:19].replace("T", " "), entry.get("run", ""),
+            entry.get("action", "").replace("approve_", "approve "),
+            f"[{color}]{escape(outcome)}[/{color}]", escape(str(detail)[:120]),
+        )
+    console.print(table)
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ src/odoo_miner/
     tools/
       odoo_source.py   # find_method, find_button, read_source, find_view_fields
       odoo_ops.py      # run_module_tests, install_module, replay_workflow
-      delivery.py      # git_push_feature_branch, send_report_email
+      delivery.py      # git_push_feature_branch, open_pull_request, send_report_email
     prompts/
       segmenter.md  tracer.md  assessor.md  planner.md  builder.md
   pipeline/
@@ -553,34 +553,37 @@ Backend scoped to the new module only:
 
 ```python
 builder = create_deep_agent(
-    model=config.MODEL,
-    tools=[read_source, run_module_tests, install_module, replay_workflow,
-           measure_effort, git_push_feature_branch, send_report_email],
+    model=chat_model("builder"),          # 120 s request timeout, bounded retries
+    tools=[read_source, *bound_tools(run_dir, module_dir, plan.module_name)],
     system_prompt=load_prompt("builder"),
     backend=CompositeBackend(
         default=StateBackend(),
         routes={
-            f"/addons/{plan.module_name}/": FilesystemBackend(root_dir=f"addons/{plan.module_name}", virtual_mode=True),
+            f"/addons/{plan.module_name}/": FilesystemBackend(root_dir=module_dir, virtual_mode=True),
             "/run/": FilesystemBackend(root_dir=run_dir, virtual_mode=True),
         },
     ),
-    interrupt_on={"git_push_feature_branch": True, "send_report_email": True},
+    interrupt_on={name: True for name in GATED_TOOLS},   # push, pull request, email
     response_format=BuildResult,
     name="builder_agent",
 )
 ```
 
-Custom tools (`tools/odoo_ops.py`, `tools/delivery.py`), all thin wrappers over
-commands that already work by hand:
+The agent works in virtual paths (`/run/plan.md`, `/addons/<module>/...`).
+`bound_tools` wraps the Odoo and delivery tools for this run: it translates
+those paths to real ones (refusing any that escape), and the push, pull request
+and email tools act only on the module in the approved plan. The plain
+functions they wrap live in `tools/odoo_ops.py` and `tools/delivery.py`:
 
-| Tool | Wraps |
+| Tool the agent sees | Does |
 |---|---|
-| `install_module(name)` | `docker compose run --rm odoo odoo -d demo -i <name> --stop-after-init`, then restart Odoo |
-| `run_module_tests(name)` | `docker compose run --rm odoo odoo -d demo -i <name> --test-tags /<name> --stop-after-init`; save output to `/run/tests.log` |
-| `replay_workflow(recording_path)` | `odoo-miner run <recording> -d <run>/after --pre-hook ./scripts/restore_db.sh --screenshots` (restore first, then install the module, then replay) |
-| `measure_effort(run_dir)` | runs segment → trace → assess on the after-run and returns total effort |
-| `git_push_feature_branch(title)` | creates `feat/<module>`, commits `addons/<module>`, pushes to the configured remote |
-| `send_report_email(to, subject, body, attachments)` | SMTP via env settings; attaches screenshots and `plan.md` |
+| `install_module()` | `docker compose run --rm odoo odoo -d demo -i <module> --stop-after-init`, then restarts Odoo |
+| `run_module_tests()` | the same with `--test-tags /<module>`; the full log goes to `/run/tests.log`, never into the module |
+| `replay_workflow(recording, output)` | restore the database, install the module, `odoo-miner run <recording> -d <output> --screenshots` |
+| `measure_effort(output)` | segment and score the after-run; returns total effort |
+| `git_push_feature_branch(module_name, title)` | commits `addons/<module>` on `feat/<module>` in a temporary worktree and pushes; never the base branch, never your checkout |
+| `open_pull_request(module_name, title, body)` | opens (or finds the already-open) pull request with `gh` |
+| `send_report_email(subject, body, attachments)` | SMTP over TLS to `REPORT_EMAIL_TO` only; attaches `/run/plan.md` and screenshots |
 
 The "after" recording: the builder writes a new Recorder-format JSON for the
 improved workflow (it can copy steps from the original and remove the ones the
@@ -592,8 +595,11 @@ Module checklist the prompt should enforce: `__manifest__.py` with correct
 `depends`, inherited views by XML ID, `tests/` with at least one
 `TransactionCase` (and an `HttpCase` tour if UI changed), no core edits.
 
-`interrupt_on` pauses before push and email even after the plan was approved:
-two human checkpoints, one before building, one before anything leaves the machine.
+`interrupt_on` pauses before each push, pull request and email even after the
+plan was approved: a person approves the plan before anything is built, and
+each action before anything leaves the machine. `odoo-miner analyze --approve`
+answers whichever pause is pending, in the shape it expects, and records the
+answer in `out/audit.jsonl`. A test fails if an outward tool is not gated.
 
 **Done when:** on the reference run, the module installs, tests pass, the after
 replay completes, effort drops, branch `feat/<module>` exists, and the email

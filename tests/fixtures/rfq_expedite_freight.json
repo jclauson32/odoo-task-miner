@@ -1,5 +1,5 @@
 {
-    "title": "rfq-to-paid-invoice",
+    "title": "Recording 10/4/2026 at 7:04:22 PM",
     "steps": [
         {
             "type": "setViewport",
@@ -12,12 +12,23 @@
         },
         {
             "type": "navigate",
-            "url": "http://localhost:8069/web/login?redirect=%2Fodoo%3F",
+            "url": "chrome://newtab/",
             "assertedEvents": [
                 {
                     "type": "navigation",
-                    "url": "http://localhost:8069/web/login?redirect=%2Fodoo%3F",
-                    "title": "Odoo"
+                    "url": "chrome://newtab/",
+                    "title": "New Incognito Tab"
+                }
+            ]
+        },
+        {
+            "type": "navigate",
+            "url": "http://localhost:8069/web/login",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "http://localhost:8069/web/login",
+                    "title": ""
                 }
             ]
         },
@@ -77,7 +88,7 @@
                 {
                     "type": "navigation",
                     "url": "http://localhost:8069/odoo",
-                    "title": "Odoo"
+                    "title": ""
                 }
             ]
         },
@@ -91,20 +102,21 @@
             "target": "main",
             "selectors": [
                 [
-                    "aria/"
+                    "aria/",
+                    "aria/[role=\"generic\"]"
                 ],
                 [
-                    "div.o_navbar_apps_menu > button"
+                    "div.o_navbar_apps_menu i"
                 ],
                 [
-                    "xpath//html/body/header/nav/div[1]/button"
+                    "xpath//html/body/header/nav/div[1]/button/i"
                 ],
                 [
-                    "pierce/div.o_navbar_apps_menu > button"
+                    "pierce/div.o_navbar_apps_menu i"
                 ]
             ],
-            "offsetY": 29,
-            "offsetX": 43
+            "offsetY": 10.90625,
+            "offsetX": 11
         },
         {
             "type": "click",
@@ -124,7 +136,7 @@
                 ]
             ],
             "offsetY": 5,
-            "offsetX": 40
+            "offsetX": 56
         },
         {
             "type": "click",
@@ -146,8 +158,8 @@
                     "text/New"
                 ]
             ],
-            "offsetY": 5,
-            "offsetX": 20
+            "offsetY": 19,
+            "offsetX": 24
         },
         {
             "type": "click",
@@ -166,8 +178,8 @@
                     "pierce/#partner_id_0"
                 ]
             ],
-            "offsetY": 6.25,
-            "offsetX": 28.9375
+            "offsetY": 18.25,
+            "offsetX": 53.9375
         },
         {
             "type": "click",
@@ -189,31 +201,29 @@
                     "text/Apex Guidewire"
                 ]
             ],
-            "offsetY": 6.25,
-            "offsetX": 44.9375
+            "offsetY": 14.25,
+            "offsetX": 74.9375
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/Add a product Add a section Add a note Catalog"
+                    "aria/Save manually",
+                    "aria/[role=\"generic\"]"
                 ],
                 [
-                    "td.o_field_x2many_list_row_add"
+                    "button.o_form_button_save > i"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[1]/td[2]"
+                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[3]/div/button[1]/i"
                 ],
                 [
-                    "pierce/td.o_field_x2many_list_row_add"
-                ],
-                [
-                    "text/Add a productAdd"
+                    "pierce/button.o_form_button_save > i"
                 ]
             ],
-            "offsetY": 27.625,
-            "offsetX": 50.890625
+            "offsetY": 7.75,
+            "offsetX": 12.75
         },
         {
             "type": "click",
@@ -235,8 +245,8 @@
                     "text/Add a product"
                 ]
             ],
-            "offsetY": 15.125,
-            "offsetX": 46.09375
+            "offsetY": 0.125,
+            "offsetX": 78.0625
         },
         {
             "type": "click",
@@ -255,82 +265,31 @@
                     "pierce/td.o_list_many2one input"
                 ]
             ],
-            "offsetY": 18.125,
-            "offsetX": 46.09375
+            "offsetY": 3.125,
+            "offsetX": 78.0625
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/[GCK-035] Guidewire Coating Kit"
+                    "aria/[FRT-EXP] Expedite freight"
                 ],
                 [
-                    "#autocomplete_0_2"
+                    "#autocomplete_0_1"
                 ],
                 [
-                    "xpath///*[@id=\"autocomplete_0_2\"]"
+                    "xpath///*[@id=\"autocomplete_0_1\"]"
                 ],
                 [
-                    "pierce/#autocomplete_0_2"
+                    "pierce/#autocomplete_0_1"
                 ],
                 [
-                    "text/[GCK-035] Guidewire"
+                    "text/[FRT-EXP] Expedite"
                 ]
             ],
-            "offsetY": 14.125,
-            "offsetX": 73.09375
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/1.00",
-                    "aria/[role=\"textbox\"]"
-                ],
-                [
-                    "td:nth-of-type(3) input"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[1]/td[3]/div/input"
-                ],
-                [
-                    "pierce/td:nth-of-type(3) input"
-                ]
-            ],
-            "offsetY": 0.125,
-            "offsetX": 82.9375
-        },
-        {
-            "type": "change",
-            "value": "13",
-            "selectors": [
-                [
-                    "aria/1.00",
-                    "aria/[role=\"textbox\"]"
-                ],
-                [
-                    "td:nth-of-type(3) input"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[1]/td[3]/div/input"
-                ],
-                [
-                    "pierce/td:nth-of-type(3) input"
-                ]
-            ],
-            "target": "main"
-        },
-        {
-            "type": "keyDown",
-            "target": "main",
-            "key": "Enter"
-        },
-        {
-            "type": "keyUp",
-            "key": "Enter",
-            "target": "main"
+            "offsetY": 17.125,
+            "offsetX": 123.0625
         },
         {
             "type": "click",
@@ -350,74 +309,75 @@
                     "pierce/button.o_form_button_save > i"
                 ]
             ],
-            "offsetY": 6.75,
-            "offsetX": 7.75
+            "offsetY": 10.75,
+            "offsetX": 11.75
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/Add a product"
+                    "aria/0.00"
                 ],
                 [
-                    "div.o_notebook_content a:nth-of-type(1)"
+                    "tbody td:nth-of-type(5)"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[2]/td[2]/a[1]"
+                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[1]/td[5]"
                 ],
                 [
-                    "pierce/div.o_notebook_content a:nth-of-type(1)"
-                ],
-                [
-                    "text/Add a product"
+                    "pierce/tbody td:nth-of-type(5)"
                 ]
             ],
-            "offsetY": 6.53125,
-            "offsetX": 42.0625
+            "offsetY": 23.625,
+            "offsetX": 87.59375
+        },
+        {
+            "type": "change",
+            "value": "50",
+            "selectors": [
+                [
+                    "aria/0.00",
+                    "aria/[role=\"textbox\"]"
+                ],
+                [
+                    "td:nth-of-type(5) input"
+                ],
+                [
+                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[1]/td[5]/div/input"
+                ],
+                [
+                    "pierce/td:nth-of-type(5) input"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "Enter"
+        },
+        {
+            "type": "keyUp",
+            "key": "Enter",
+            "target": "main"
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/Search a product"
+                    "div.oe_title div.o_readonly_modifier"
                 ],
                 [
-                    "td.o_list_many2one input"
+                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[1]/h1/div[2]"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[2]/td[2]/div/div/div/div/div/input"
-                ],
-                [
-                    "pierce/td.o_list_many2one input"
+                    "pierce/div.oe_title div.o_readonly_modifier"
                 ]
             ],
-            "offsetY": 9.53125,
-            "offsetX": 42.0625
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/[PTFE-014] PTFE Liner 0.014in"
-                ],
-                [
-                    "#autocomplete_0_5"
-                ],
-                [
-                    "xpath///*[@id=\"autocomplete_0_5\"]"
-                ],
-                [
-                    "pierce/#autocomplete_0_5"
-                ],
-                [
-                    "text/[PTFE-014] PTFE"
-                ]
-            ],
-            "offsetY": 8.53125,
-            "offsetX": 94.0625
+            "offsetY": 5.25,
+            "offsetX": 515
         },
         {
             "type": "click",
@@ -438,87 +398,155 @@
                 ]
             ],
             "offsetY": 3.75,
-            "offsetX": 6.75
+            "offsetX": 8.75
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "tr:nth-of-type(1) > td.o_list_many2one div > span"
+                    "aria/Requests for Quotation"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[1]/td[2]/div/div/span"
+                    "div.o_control_panel a"
                 ],
                 [
-                    "pierce/tr:nth-of-type(1) > td.o_list_many2one div > span"
+                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[2]/ol/li/a"
+                ],
+                [
+                    "pierce/div.o_control_panel a"
                 ]
             ],
-            "offsetY": 5.125,
-            "offsetX": 211.0625
+            "offsetY": 8,
+            "offsetX": 107.03125
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/Internal link"
+                    "tbody > tr:nth-of-type(1) > td:nth-of-type(4)"
                 ],
                 [
-                    "td.o_list_many2one button.btn-link"
+                    "xpath//html/body/div[1]/div/div[2]/div[2]/table/tbody/tr[1]/td[4]"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[1]/td[2]/div/div/div/button[1]"
-                ],
-                [
-                    "pierce/td.o_list_many2one button.btn-link"
+                    "pierce/tbody > tr:nth-of-type(1) > td:nth-of-type(4)"
                 ]
             ],
-            "offsetY": 8.625,
-            "offsetX": 17.0625
+            "offsetY": 16,
+            "offsetX": 113.046875
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/Purchase[role=\"tab\"]"
+                    "aria/Confirm Order",
+                    "aria/[role=\"generic\"]"
                 ],
                 [
-                    "div.o_content li:nth-of-type(2) > a"
+                    "#draft_confirm > span"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[4]/div[1]/ul/li[2]/a"
+                    "xpath///*[@id=\"draft_confirm\"]/span"
                 ],
                 [
-                    "pierce/div.o_content li:nth-of-type(2) > a"
+                    "pierce/#draft_confirm > span"
+                ],
+                [
+                    "text/Confirm Order"
                 ]
             ],
             "offsetY": 13.25,
-            "offsetX": 25.140625
+            "offsetX": 40.171875
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/Inventory"
+                    "aria/Requests for Quotation"
                 ],
                 [
-                    "li:nth-of-type(3) > a"
+                    "div.o_control_panel a"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[4]/div[1]/ul/li[3]/a"
+                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[2]/ol/li/a"
                 ],
                 [
-                    "pierce/li:nth-of-type(3) > a"
+                    "pierce/div.o_control_panel a"
                 ],
                 [
-                    "text/Inventory"
+                    "text/Requests for"
                 ]
             ],
-            "offsetY": 17.25,
-            "offsetX": 57.96875
+            "offsetY": 8,
+            "offsetX": 74.03125
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Products",
+                    "aria/[role=\"generic\"]"
+                ],
+                [
+                    "button:nth-of-type(2) > span"
+                ],
+                [
+                    "xpath//html/body/header/nav/div[3]/button[2]/span"
+                ],
+                [
+                    "pierce/button:nth-of-type(2) > span"
+                ],
+                [
+                    "text/Products"
+                ]
+            ],
+            "offsetY": 28,
+            "offsetX": 26.625
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Products[role=\"menuitem\"]"
+                ],
+                [
+                    "div.o-main-components-container a"
+                ],
+                [
+                    "xpath//html/body/div[2]/div[1]/div[1]/div/a"
+                ],
+                [
+                    "pierce/div.o-main-components-container a"
+                ]
+            ],
+            "offsetY": 19,
+            "offsetX": 32.4375
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "article:nth-of-type(2) div.mb-1"
+                ],
+                [
+                    "xpath//html/body/div[1]/div/div[2]/div/article[2]/main/div[1]"
+                ],
+                [
+                    "pierce/article:nth-of-type(2) div.mb-1"
+                ],
+                [
+                    "text/Expedite freight [FRT-EXP]"
+                ]
+            ],
+            "offsetY": 35,
+            "offsetX": 144.75
         },
         {
             "type": "click",
@@ -528,17 +556,17 @@
                     "aria/Purchase[role=\"tab\"]"
                 ],
                 [
-                    "div.o_content li:nth-of-type(2) > a"
+                    "li:nth-of-type(2) > a"
                 ],
                 [
                     "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[4]/div[1]/ul/li[2]/a"
                 ],
                 [
-                    "pierce/div.o_content li:nth-of-type(2) > a"
+                    "pierce/li:nth-of-type(2) > a"
                 ]
             ],
-            "offsetY": 31.25,
-            "offsetX": 77.140625
+            "offsetY": 32.25,
+            "offsetX": 41.140625
         },
         {
             "type": "click",
@@ -560,8 +588,8 @@
                     "text/General Information"
                 ]
             ],
-            "offsetY": 18.25,
-            "offsetX": 109
+            "offsetY": 21.25,
+            "offsetX": 114
         },
         {
             "type": "click",
@@ -580,67 +608,54 @@
                     "pierce/#standard_price_0"
                 ]
             ],
-            "offsetY": 11.703125,
-            "offsetX": 48.53125
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Cost?"
-                ],
-                [
-                    "#standard_price_0"
-                ],
-                [
-                    "xpath///*[@id=\"standard_price_0\"]"
-                ],
-                [
-                    "pierce/#standard_price_0"
-                ]
-            ],
-            "offsetY": 13.703125,
-            "offsetX": 60.53125
-        },
-        {
-            "type": "doubleClick",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Sales Price?"
-                ],
-                [
-                    "#lst_price_0"
-                ],
-                [
-                    "xpath///*[@id=\"lst_price_0\"]"
-                ],
-                [
-                    "pierce/#lst_price_0"
-                ]
-            ],
-            "offsetY": 13.25,
-            "offsetX": 31.53125
+            "offsetY": 15.703125,
+            "offsetX": 52.421875
         },
         {
             "type": "change",
-            "value": "12.50",
+            "value": "50",
             "selectors": [
                 [
-                    "aria/Sales Price?"
+                    "aria/Cost?"
                 ],
                 [
-                    "#lst_price_0"
+                    "#standard_price_0"
                 ],
                 [
-                    "xpath///*[@id=\"lst_price_0\"]"
+                    "xpath///*[@id=\"standard_price_0\"]"
                 ],
                 [
-                    "pierce/#lst_price_0"
+                    "pierce/#standard_price_0"
                 ]
             ],
             "target": "main"
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "Enter"
+        },
+        {
+            "type": "keyUp",
+            "key": "Enter",
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "div.o_notebook_content > div > div.o_group"
+                ],
+                [
+                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[4]/div[2]/div/div[1]"
+                ],
+                [
+                    "pierce/div.o_notebook_content > div > div.o_group"
+                ]
+            ],
+            "offsetY": 126.25,
+            "offsetX": 538
         },
         {
             "type": "click",
@@ -660,246 +675,45 @@
                     "pierce/button.o_form_button_save > i"
                 ]
             ],
-            "offsetY": 1.75,
-            "offsetX": 5.875
+            "offsetY": 13.75,
+            "offsetX": 2.8125
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/P00008"
+                    "aria/Purchase[role=\"menuitem\"]"
                 ],
                 [
-                    "li.o_back_button > a"
+                    "header a"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[2]/ol/li[2]/a"
+                    "xpath//html/body/header/nav/a"
                 ],
                 [
-                    "pierce/li.o_back_button > a"
+                    "pierce/header a"
                 ]
             ],
-            "offsetY": 8,
-            "offsetX": 32.953125
+            "offsetY": 30,
+            "offsetX": 16.640625
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "tr:nth-of-type(2) > td.o_list_many2one div > span"
+                    "tbody > tr:nth-of-type(1) > td:nth-of-type(4)"
                 ],
                 [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[2]/td[2]/div/div/span"
+                    "xpath//html/body/div[1]/div/div[2]/div[2]/table/tbody/tr[1]/td[4]"
                 ],
                 [
-                    "pierce/tr:nth-of-type(2) > td.o_list_many2one div > span"
+                    "pierce/tbody > tr:nth-of-type(1) > td:nth-of-type(4)"
                 ]
             ],
-            "offsetY": 8.53125,
-            "offsetX": 216.078125
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "td.o_list_many2one > div > div > div"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[2]/td[2]/div/div/div"
-                ],
-                [
-                    "pierce/td.o_list_many2one > div > div > div"
-                ]
-            ],
-            "offsetY": 19.53125,
-            "offsetX": 349.078125
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Internal link"
-                ],
-                [
-                    "td.o_list_many2one button.btn-link"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[3]/div[2]/div/div[1]/div/div[2]/table/tbody/tr[2]/td[2]/div/div/div/button[1]"
-                ],
-                [
-                    "pierce/td.o_list_many2one button.btn-link"
-                ]
-            ],
-            "offsetY": 11.03125,
-            "offsetX": 16.859375
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Sales Price?"
-                ],
-                [
-                    "#lst_price_0"
-                ],
-                [
-                    "xpath///*[@id=\"lst_price_0\"]"
-                ],
-                [
-                    "pierce/#lst_price_0"
-                ]
-            ],
-            "offsetY": 7.25,
-            "offsetX": 36.53125
-        },
-        {
-            "type": "change",
-            "value": "3.20",
-            "selectors": [
-                [
-                    "aria/Sales Price?"
-                ],
-                [
-                    "#lst_price_0"
-                ],
-                [
-                    "xpath///*[@id=\"lst_price_0\"]"
-                ],
-                [
-                    "pierce/#lst_price_0"
-                ]
-            ],
-            "target": "main"
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Save manually",
-                    "aria/[role=\"generic\"]"
-                ],
-                [
-                    "button.o_form_button_save > i"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[3]/div/button[1]/i"
-                ],
-                [
-                    "pierce/button.o_form_button_save > i"
-                ]
-            ],
-            "offsetY": 5.75,
-            "offsetX": 7.046875
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/P00008"
-                ],
-                [
-                    "li.o_back_button > a"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[2]/ol/li[2]/a"
-                ],
-                [
-                    "pierce/li.o_back_button > a"
-                ],
-                [
-                    "text/P00008"
-                ]
-            ],
-            "offsetY": 10,
-            "offsetX": 32.953125
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Confirm Order"
-                ],
-                [
-                    "#draft_confirm"
-                ],
-                [
-                    "xpath///*[@id=\"draft_confirm\"]"
-                ],
-                [
-                    "pierce/#draft_confirm"
-                ]
-            ],
-            "offsetY": 25.25,
-            "offsetX": 49.171875
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Receive Products",
-                    "aria/[role=\"generic\"]"
-                ],
-                [
-                    "button.btn-primary > span"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[1]/div[1]/button[1]/span"
-                ],
-                [
-                    "pierce/button.btn-primary > span"
-                ],
-                [
-                    "text/Receive Products"
-                ]
-            ],
-            "offsetY": 11.25,
-            "offsetX": 74
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "aria/Validate"
-                ],
-                [
-                    "div.o_form_sheet_bg button.btn-primary"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[1]/div[1]/button[1]"
-                ],
-                [
-                    "pierce/div.o_form_sheet_bg button.btn-primary"
-                ]
-            ],
-            "offsetY": 7.25,
-            "offsetX": 66
-        },
-        {
-            "type": "click",
-            "target": "main",
-            "selectors": [
-                [
-                    "li.o_back_button > a"
-                ],
-                [
-                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[2]/ol/li[2]/a"
-                ],
-                [
-                    "pierce/li.o_back_button > a"
-                ]
-            ],
-            "offsetY": 5,
-            "offsetX": 24.953125
+            "offsetY": 24,
+            "offsetX": 117.046875
         },
         {
             "type": "click",
@@ -922,8 +736,8 @@
                     "text/Create Bill"
                 ]
             ],
-            "offsetY": 7.25,
-            "offsetX": 46
+            "offsetY": 9.25,
+            "offsetX": 35
         },
         {
             "type": "click",
@@ -946,8 +760,8 @@
                     "text/Confirm"
                 ]
             ],
-            "offsetY": 7.25,
-            "offsetX": 46
+            "offsetY": 9.25,
+            "offsetX": 35
         },
         {
             "type": "click",
@@ -970,8 +784,28 @@
                     "text/Close"
                 ]
             ],
-            "offsetY": 19.75,
-            "offsetX": 33
+            "offsetY": 14.75,
+            "offsetX": 28
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/BILL/2026/10/0001[role=\"heading\"]"
+                ],
+                [
+                    "h1"
+                ],
+                [
+                    "xpath//html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[1]/h1"
+                ],
+                [
+                    "pierce/h1"
+                ]
+            ],
+            "offsetY": 48.25,
+            "offsetX": 855
         },
         {
             "type": "click",
@@ -987,28 +821,50 @@
                     "pierce/#invoice_date_1"
                 ]
             ],
-            "offsetY": 5.25,
-            "offsetX": 35.109375
+            "offsetY": 13.25,
+            "offsetX": 43.109375
         },
         {
             "type": "click",
             "target": "main",
             "selectors": [
                 [
-                    "aria/4"
+                    "aria/4",
+                    "aria/[role=\"generic\"]"
                 ],
                 [
-                    "button.o_today"
+                    "button.o_today > span"
                 ],
                 [
-                    "xpath//html/body/div[2]/div[1]/div[1]/div/div[1]/div[1]/div/button[4]"
+                    "xpath//html/body/div[2]/div[1]/div[1]/div/div[1]/div[1]/div/button[4]/span"
                 ],
                 [
-                    "pierce/button.o_today"
+                    "pierce/button.o_today > span"
                 ]
             ],
-            "offsetY": 27.140625,
-            "offsetX": 32.0625
+            "offsetY": 17.640625,
+            "offsetX": 2.015625
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Save manually",
+                    "aria/[role=\"generic\"]"
+                ],
+                [
+                    "button.o_form_button_save > i"
+                ],
+                [
+                    "xpath//html/body/div[1]/div/div/div[1]/div/div[1]/div[3]/div/button[1]/i"
+                ],
+                [
+                    "pierce/button.o_form_button_save > i"
+                ]
+            ],
+            "offsetY": 0.75,
+            "offsetX": 5.3125
         },
         {
             "type": "click",
@@ -1031,8 +887,8 @@
                     "text/Confirm"
                 ]
             ],
-            "offsetY": 0.25,
-            "offsetX": 8
+            "offsetY": 13.25,
+            "offsetX": 39
         },
         {
             "type": "click",
@@ -1052,8 +908,8 @@
                     "pierce/#account_invoice_payment_btn > span"
                 ]
             ],
-            "offsetY": 10.25,
-            "offsetX": 19.484375
+            "offsetY": 15.25,
+            "offsetX": 5.484375
         },
         {
             "type": "click",
@@ -1076,18 +932,8 @@
                     "text/Create Payment"
                 ]
             ],
-            "offsetY": 13.90625,
-            "offsetX": 67
-        },
-        {
-            "type": "keyDown",
-            "target": "main",
-            "key": "Alt"
-        },
-        {
-            "type": "keyUp",
-            "key": "Alt",
-            "target": "main"
+            "offsetY": 5.90625,
+            "offsetX": 81
         }
     ]
 }

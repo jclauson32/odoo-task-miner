@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "source": "/home/nosualc/Documents/Github/odoo-miner/recordings/rfq-to-paid-invoice.json",
+  "source": "tests/fixtures/rfq_to_payment.json",
   "title": "rfq-to-paid-invoice",
   "replay_completed": true,
   "clicks": [

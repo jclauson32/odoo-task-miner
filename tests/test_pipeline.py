@@ -183,7 +183,9 @@ def test_cli_replay_missing_script(tmp_path):
 
 # --- Real Odoo 18 recording ------------------------------------------------
 
-REAL = FIXTURES / "rfq_to_payment.json"
+# Exercises the new-tab start and Odoo 18 selectors; rfq_to_payment.json is the
+# reference workflow the agents and gold labels use.
+REAL = FIXTURES / "rfq_expedite_freight.json"
 
 
 def test_real_recording_skips_new_tab_and_keeps_indexes():

@@ -36,10 +36,13 @@ one user step with:
 | `calls` | backend calls this step triggered: `kind` (`read`/`write`/`compute`/`action_load`/`unknown`), `model`, `method`, `args`, `kwargs`, `rpc_error` |
 | `has_write` | any call of kind `write` |
 
-Reference recording: `tests/fixtures/rfq_to_payment.json` (create RFQ → add
-freight line → confirm → set product cost → create bill → hit "bill date
-required" error → fix → post → pay). Its session is the main test input for
-every agent below. Generate it with:
+Reference recording: `tests/fixtures/rfq_to_payment.json` (create an RFQ for
+Apex Guidewire Supply with two product lines → open each product and set its
+price → confirm the order → receive and validate → create the bill → hit the
+"bill date required" error → set the date → post → pay). Its session is
+committed as `tests/fixtures/rfq_to_payment.session.json` and is the main test
+input for every agent below; the gold segments in `evals/datasets/` are
+labelled against it. Regenerate it with:
 
 ```bash
 odoo-miner run tests/fixtures/rfq_to_payment.json -d out/rfq_to_payment \

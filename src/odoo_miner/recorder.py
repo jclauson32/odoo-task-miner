@@ -23,6 +23,16 @@ BROWSER_PAGE = re.compile(r"^(chrome|about|edge|brave|chrome-search):")
 
 _NAME_ATTR = re.compile(r"\[name=['\"]?([\w.\-]+)['\"]?\]")
 
+# Values typed into fields like these are replaced at ingest. The analysis never
+# needs them, and clicks.json / session.json are sent to the model and stored in
+# traces. Replay reads the original recording, so it can still log in.
+SECRET_FIELD = re.compile(r"passw(or)?d|\bpwd\b|passcode|secret|token|api[\s_-]?key|\botp\b|totp", re.I)
+REDACTED = "<redacted>"
+
+
+def is_secret_field(target: Target | None) -> bool:
+    return target is not None and bool(SECRET_FIELD.search(" ".join(target.selectors)))
+
 
 class RecordingError(ValueError):
     pass
@@ -36,7 +46,8 @@ def _flatten_selector(selector: Any) -> str:
 
 
 _ROLE_SUFFIX = re.compile(r"\[role=.*\]$")
-_ICON_GLYPHS = re.compile("[-]")  # icon-font characters, not words
+# Icon fonts draw their glyphs from the Unicode Private Use Area; they are not words.
+_ICON_GLYPHS = re.compile("[\ue000-\uf8ff]")
 
 
 def _aria_label(parts: list[str]) -> str | None:
@@ -116,13 +127,17 @@ def parse_recording(data: dict, source: str = "<memory>", keep_noise: bool = Fal
 
         if not skip:
             page_url = step.get("url") if step_type == "navigate" else current_url
+            target = parse_target(step.get("selectors"))
+            value = step.get("value")
+            if value is not None and is_secret_field(target):
+                value = REDACTED
             clicks.append(
                 Click(
                     index=len(clicks),
                     step_index=step_index,
                     type=step_type,
-                    target=parse_target(step.get("selectors")),
-                    value=step.get("value"),
+                    target=target,
+                    value=value,
                     key=step.get("key"),
                     url=step.get("url") if step_type == "navigate" else None,
                     page_url=page_url,

@@ -415,9 +415,12 @@ def test_build_only_runs_when_approved():
 
     from odoo_miner.pipeline.graph import _approved
 
-    assert _approved({"approval": {"approved": True}}) == "build"
-    assert _approved({"approval": {"approved": False}}) == END
+    assert _approved({"approval": {"approved": True}, "decision": "customize"}) == "build"
+    assert _approved({"approval": {"approved": False}, "decision": "customize"}) == END
     assert _approved({}) == END
+    # An approved plan that needs no module has nothing to build.
+    for decision in ("no_change", "data_fix", "configure"):
+        assert _approved({"approval": {"approved": True}, "decision": decision}) == END
 
 
 def test_errors_accumulate_rather_than_overwrite():

@@ -58,8 +58,8 @@ def assess_node(state: PipelineState) -> dict:
 
 def plan_node(state: PipelineState) -> dict:
     out = _run_dir(state) / "plan.json"
-    run_planner_path(_run_dir(state), out, run=state.get("run", "adhoc"))
-    return {"plan_path": str(out)}
+    plan = run_planner_path(_run_dir(state), out, run=state.get("run", "adhoc"))
+    return {"plan_path": str(out), "decision": plan.decision}
 
 
 def approve_node(state: PipelineState) -> dict:
@@ -141,7 +141,9 @@ def record_tool_decision(payload: Any, approved: bool, notes: str, run: str | No
 
 
 def _approved(state: PipelineState) -> str:
-    return "build" if (state.get("approval") or {}).get("approved") else END
+    """Build only an approved plan that asks for a module; anything else ends here."""
+    approved = (state.get("approval") or {}).get("approved")
+    return "build" if approved and state.get("decision") == "customize" else END
 
 
 def build_graph(checkpointer: Any = None, until: str | None = None):

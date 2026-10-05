@@ -375,9 +375,9 @@ def _show_pending(payload: dict) -> None:
     for key in ("decision", "plan_summary", "module_name", "plan_md"):
         if payload.get(key) is not None:
             console.print(f"  {key}: {escape(str(payload[key]))}")
-    for key in ("acceptance_criteria", "risks"):
+    for key, label in (("acceptance_criteria", "acceptance criterion"), ("risks", "risk")):
         for item in payload.get(key) or []:
-            console.print(f"  {key[:-1]}: {escape(str(item))}")
+            console.print(f"  {label}: {escape(str(item))}")
     _show_citation_check(payload.get("unverified_citations") or [])
 
 

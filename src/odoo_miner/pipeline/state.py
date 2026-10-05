@@ -23,6 +23,7 @@ class PipelineState(TypedDict, total=False):
     traces_path: str
     assessment_path: str
     plan_path: str
+    decision: str                 # the plan's decision; only "customize" is built
     approval: dict                # {"approved": bool, "notes": str}
     build_path: str
     errors: Annotated[list[str], _extend]

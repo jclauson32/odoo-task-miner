@@ -276,3 +276,31 @@ def test_show_renders_assessment_and_plan(tmp_path):
     assert r.exit_code == 0
     assert "no change" in r.output and "deliberate control" in r.output
     assert "check by hand" in r.output
+
+
+# --- secrets ---------------------------------------------------------------------
+
+
+def test_passwords_typed_in_a_recording_are_redacted_at_ingest():
+    """session.json is sent to the model and stored in traces; a password must not be."""
+    log = load_recording(FIXTURES / "rfq_to_payment.json")
+    by_step = {c.step_index: c for c in log.clicks}
+    assert by_step[5].value == "<redacted>"          # the password field
+    assert by_step[2].value == "admin"               # the login name is kept
+
+
+@pytest.mark.parametrize("selectors", [
+    [["input[type='password']"]], [["#pwd"]], [["aria/API key"]], [["[name='otp']"]],
+])
+def test_secret_fields_are_recognised(selectors):
+    from odoo_miner.recorder import parse_recording
+
+    log = parse_recording({"steps": [{"type": "change", "value": "hunter2", "selectors": selectors}]})
+    assert log.clicks[0].value == "<redacted>"
+
+
+def test_ordinary_fields_are_not_redacted():
+    from odoo_miner.recorder import parse_recording
+
+    log = parse_recording({"steps": [{"type": "change", "value": "12.50", "selectors": [["aria/Sales Price"]]}]})
+    assert log.clicks[0].value == "12.50"

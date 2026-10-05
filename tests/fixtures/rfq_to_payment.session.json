@@ -94,7 +94,7 @@
         "button_name": null,
         "css": "#password"
       },
-      "value": "admin",
+      "value": "<redacted>",
       "key": null,
       "url": null,
       "page_url": "http://localhost:8069/web/login?redirect=%2Fodoo%3F",

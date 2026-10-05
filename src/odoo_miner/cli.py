@@ -398,6 +398,9 @@ def analyze(
         None, "--approve/--reject", help="Answer a pending approval and continue."
     ),
     notes: str = typer.Option("", "--notes", help="Notes to record with the approval."),
+    restart: bool = typer.Option(
+        False, "--restart", help="Start over instead of resuming an unfinished run on this thread."
+    ),
 ):
     """Run the stages as one LangGraph pipeline, resumable and traced as one tree."""
     from langgraph.types import Command
@@ -408,6 +411,7 @@ def analyze(
         record_tool_decision,
         resume_value,
         sqlite_checkpointer,
+        start_or_resume,
     )
     from .pipeline.state import STAGES
 
@@ -429,7 +433,10 @@ def analyze(
                 "run_dir": str(run_dir),
                 "session_path": str(session),
             }
-            result = graph.invoke(state, config=config)
+            unfinished = graph.get_state(config).next
+            if unfinished and not restart:
+                console.print(f"Resuming {thread_id} at {', '.join(unfinished)} (pass --restart to start over).")
+            result = start_or_resume(graph, config, state, restart=restart)
         else:
             waiting = graph.get_state(config).interrupts
             if not waiting:

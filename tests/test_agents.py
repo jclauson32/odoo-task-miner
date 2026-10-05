@@ -624,3 +624,44 @@ def test_citation_check_flags_missing_files_and_lines(fake_source):
 def test_unverified_citations_reach_the_plan_contract():
     plan = Plan(decision="no_change", summary="s", unverified_citations=["x"])
     assert Plan.model_validate_json(plan.model_dump_json()).unverified_citations == ["x"]
+
+
+def test_an_unfinished_run_resumes_instead_of_starting_over():
+    """A crash mid-pipeline must not re-run (and re-pay for) the finished stages."""
+    from typing import TypedDict
+
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+
+    from odoo_miner.pipeline.graph import start_or_resume
+
+    class State(TypedDict, total=False):
+        done: list
+
+    calls = {"first": 0, "second": 0}
+
+    def first(state):
+        calls["first"] += 1
+        return {"done": ["first"]}
+
+    def second(state):
+        calls["second"] += 1
+        if calls["second"] == 1:
+            raise ConnectionError("network blip")
+        return {"done": state["done"] + ["second"]}
+
+    graph = StateGraph(State)
+    graph.add_node("first", first)
+    graph.add_node("second", second)
+    graph.add_edge(START, "first")
+    graph.add_edge("first", "second")
+    graph.add_edge("second", END)
+    pipeline = graph.compile(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "crash"}}
+
+    with pytest.raises(ConnectionError):
+        start_or_resume(pipeline, config, {"done": []})
+    result = start_or_resume(pipeline, config, {"done": []})
+
+    assert result["done"] == ["first", "second"]
+    assert calls == {"first": 1, "second": 2}, "the finished stage ran again"

@@ -180,6 +180,22 @@ def build_graph(checkpointer: Any = None, until: str | None = None):
     return graph.compile(checkpointer=checkpointer)
 
 
+def start_or_resume(graph: Any, config: dict, initial_state: dict, restart: bool = False) -> dict:
+    """Run the pipeline on a thread, continuing an unfinished run instead of redoing it.
+
+    LangGraph resumes from the last finished node only when invoked with no
+    input; invoking with the initial state starts over and pays for every
+    stage again. A run paused for approval is left alone - answering it is
+    `--approve` / `--reject`.
+    """
+    snapshot = graph.get_state(config)
+    if snapshot.interrupts:
+        return {"__interrupt__": list(snapshot.interrupts)}
+    if snapshot.next and not restart:
+        return graph.invoke(None, config=config)
+    return graph.invoke(initial_state, config=config)
+
+
 def sqlite_checkpointer(path: str | Path):
     """A SqliteSaver context manager, so runs resume across processes."""
     from langgraph.checkpoint.sqlite import SqliteSaver

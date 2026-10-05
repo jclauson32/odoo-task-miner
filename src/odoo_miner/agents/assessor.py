@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import Session, SessionClick
-from .config import load_prompt, model_for, settings, trace_config
+from .config import chat_model, load_prompt, settings, trace_config
 from .contracts import (
     Assessment,
     Segment,
@@ -350,7 +350,7 @@ def build_assessor(model: str | None = None):
     from langchain.agents import create_agent
 
     return create_agent(
-        model=model or model_for("assessor"),
+        model=model or chat_model("assessor"),
         tools=[],
         system_prompt=load_prompt("assessor"),
         response_format=SegmentAssessment,

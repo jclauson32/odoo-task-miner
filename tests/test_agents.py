@@ -9,6 +9,7 @@ when it is absent.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -665,3 +666,34 @@ def test_an_unfinished_run_resumes_instead_of_starting_over():
 
     assert result["done"] == ["first", "second"]
     assert calls == {"first": 1, "second": 2}, "the finished stage ran again"
+
+
+def test_checkpoints_restore_contract_types_under_strict_deserialization(tmp_path, monkeypatch):
+    """Resuming must not depend on LangGraph tolerating unregistered types."""
+    from typing import TypedDict
+
+    from langgraph.graph import END, START, StateGraph
+
+    from odoo_miner.pipeline.graph import checkpoint_types, sqlite_checkpointer
+
+    monkeypatch.setenv("LANGGRAPH_STRICT_MSGPACK", "true")
+
+    class State(TypedDict, total=False):
+        draft: Any
+
+    def node(state):
+        return {"draft": TracedSegmentDraft(segment_id="s01", kind="action", explanation="x")}
+
+    graph = StateGraph(State)
+    graph.add_node("node", node)
+    graph.add_edge(START, "node")
+    graph.add_edge("node", END)
+    config = {"configurable": {"thread_id": "t"}}
+
+    with sqlite_checkpointer(tmp_path / "pipeline.sqlite") as saver:
+        graph.compile(checkpointer=saver).invoke({}, config)
+    with sqlite_checkpointer(tmp_path / "pipeline.sqlite") as saver:
+        restored = graph.compile(checkpointer=saver).get_state(config).values["draft"]
+
+    assert isinstance(restored, TracedSegmentDraft) and restored.segment_id == "s01"
+    assert ("odoo_miner.agents.contracts", "Plan") in checkpoint_types()

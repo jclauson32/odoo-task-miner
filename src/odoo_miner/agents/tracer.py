@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import NetworkCall, Session, SessionClick
-from .config import load_prompt, model_for, trace_config
+from .config import chat_model, load_prompt, trace_config
 from .contracts import (
     CodeRef,
     QueryRef,
@@ -189,7 +189,7 @@ def build_tracer(model: str | None = None):
     from langchain.agents import create_agent
 
     return create_agent(
-        model=model or model_for("tracer"),
+        model=model or chat_model("tracer"),
         tools=odoo_source.TOOLS,
         system_prompt=load_prompt("tracer"),
         middleware=tracer_middleware(),

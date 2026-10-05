@@ -7,6 +7,7 @@ approval gate between planning and building. Each node calls the same
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -196,13 +197,44 @@ def start_or_resume(graph: Any, config: dict, initial_state: dict, restart: bool
     return graph.invoke(initial_state, config=config)
 
 
+def checkpoint_types() -> list[tuple[str, str]]:
+    """Every contract model, registered so checkpoints can restore it.
+
+    Agents run inside pipeline nodes inherit the checkpointer, so their
+    structured responses (SegmentLog, TracedSegmentDraft, Plan, ...) are
+    saved in it. LangGraph restores only registered types - unregistered ones
+    warn today and are slated to be refused - and a refused type would break
+    resuming a run. Derived from the module so a new contract cannot be missed.
+    """
+    from pydantic import BaseModel
+
+    from ..agents import contracts
+
+    return sorted(
+        (value.__module__, value.__name__)
+        for value in vars(contracts).values()
+        if isinstance(value, type) and issubclass(value, BaseModel)
+        and value.__module__ == contracts.__name__
+    )
+
+
+@contextmanager
 def sqlite_checkpointer(path: str | Path):
-    """A SqliteSaver context manager, so runs resume across processes."""
+    """A SqliteSaver for one run folder, so runs resume across processes."""
+    import sqlite3
+
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
     from langgraph.checkpoint.sqlite import SqliteSaver
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    return SqliteSaver.from_conn_string(str(path))
+    connection = sqlite3.connect(str(path), check_same_thread=False)
+    try:
+        yield SqliteSaver(
+            connection, serde=JsonPlusSerializer(allowed_msgpack_modules=checkpoint_types())
+        )
+    finally:
+        connection.close()
 
 
 # Module-level graph for `langgraph dev` / LangGraph Studio, which supplies

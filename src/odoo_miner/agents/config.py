@@ -20,6 +20,13 @@ DEFAULT_FAST_MODEL = "anthropic:claude-haiku-4-5"
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
+# Per-request timeout. Measured over 278 calls in the live runs: median 2.4 s,
+# 95th percentile 13 s, slowest 59 s (the planner). Without a timeout the SDK
+# waits 10 minutes per attempt, so one stalled connection froze a run for
+# over five minutes before it was noticed. Two retries bound the worst case.
+REQUEST_TIMEOUT_S = 120
+MAX_RETRIES = 2
+
 
 def _load_dotenv_once() -> None:
     """Load .env from the project root, if python-dotenv is available."""
@@ -98,6 +105,17 @@ def trace_config(run: str, stage: str, **extra) -> dict:
         "metadata": {"run": run, "stage": stage, **extra},
         "tags": ["odoo-miner", stage],
     }
+
+
+def chat_model(stage: str):
+    """The chat model for a stage, with a request timeout and bounded retries.
+
+    Every agent builds its model here rather than passing a model string, so
+    no stage can hang on a stalled connection.
+    """
+    from langchain.chat_models import init_chat_model
+
+    return init_chat_model(model_for(stage), timeout=REQUEST_TIMEOUT_S, max_retries=MAX_RETRIES)
 
 
 def model_for(stage: str) -> str:

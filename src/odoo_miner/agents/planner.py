@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .config import load_prompt, model_for, settings, trace_config
+from .config import chat_model, load_prompt, settings, trace_config
 from .contracts import Plan
 from .tools import odoo_source
 
@@ -88,7 +88,7 @@ def build_planner(run_dir: Path, model: str | None = None):
         )
 
     return create_deep_agent(
-        model=model or model_for("planner"),
+        model=model or chat_model("planner"),
         tools=[odoo_source.find_method, odoo_source.find_button, odoo_source.find_view_fields],
         system_prompt=load_prompt("planner"),
         subagents=[{
@@ -99,7 +99,7 @@ def build_planner(run_dir: Path, model: str | None = None):
             ),
             "system_prompt": load_prompt("planner_researcher"),
             "tools": [odoo_source.find_method, odoo_source.find_button, odoo_source.read_source],
-            "model": model_for("researcher"),
+            "model": chat_model("researcher"),
         }],
         backend=CompositeBackend(default=StateBackend(), routes=routes),
         permissions=permissions or None,

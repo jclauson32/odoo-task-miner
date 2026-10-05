@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .config import load_prompt, model_for, settings, trace_config
+from .config import chat_model, load_prompt, settings, trace_config
 from .contracts import BuildResult, Plan
 from .tools import delivery, odoo_ops, odoo_source
 
@@ -147,7 +147,7 @@ def build_builder(run_dir: Path, plan: Plan, model: Any = None):
     }
 
     return create_deep_agent(
-        model=model or model_for("builder"),
+        model=model or chat_model("builder"),
         tools=[odoo_source.read_source, *bound_tools(Path(run_dir), module_dir, plan.module_name)],
         system_prompt=load_prompt("builder"),
         backend=CompositeBackend(default=StateBackend(), routes=routes),

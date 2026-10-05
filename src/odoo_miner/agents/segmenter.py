@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import Session, SessionClick
-from .config import load_prompt, model_for, trace_config
+from .config import chat_model, load_prompt, trace_config
 from .contracts import SegmentLog
 
 # keyDown steps that carry no intent of their own. Enter is meaningful (it
@@ -175,7 +175,7 @@ def build_segmenter(model: str | None = None):
     from langchain.agents import create_agent
 
     return create_agent(
-        model=model or model_for("segmenter"),
+        model=model or chat_model("segmenter"),
         tools=[],
         system_prompt=load_prompt("segmenter"),
         response_format=SegmentLog,

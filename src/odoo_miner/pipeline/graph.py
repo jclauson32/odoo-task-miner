@@ -127,7 +127,11 @@ def build_node(state: PipelineState) -> dict:
 
     out = _run_dir(state) / "build.json"
     run_builder_path(
-        _run_dir(state), Path(state["plan_path"]), out, run=state.get("run", "adhoc")
+        _run_dir(state),
+        Path(state["plan_path"]),
+        out,
+        run=state.get("run", "adhoc"),
+        notes=(state.get("approval") or {}).get("notes"),
     )
     return {"build_path": str(out)}
 

@@ -489,6 +489,38 @@ def test_the_revision_request_carries_the_notes():
     assert "plan.rejected-" in request
 
 
+def test_approving_with_notes_hands_them_to_the_builder(tmp_path, monkeypatch):
+    """"Approve, and also do X" must reach the builder, not only the audit log."""
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.types import Command
+
+    from odoo_miner.agents import builder
+    from odoo_miner.agents.builder import BUILD_PROMPT, build_prompt
+    from odoo_miner.pipeline import graph as pipeline
+
+    def fake_planner(run_dir, out, run="adhoc", feedback=None, agent=None):
+        plan = Plan(decision="customize", summary="s", module_name="demo_mod")
+        Path(out).write_text(plan.model_dump_json())
+        return plan
+
+    built = []
+    monkeypatch.setattr(pipeline, "run_planner_path", fake_planner)
+    monkeypatch.setattr(builder, "run_builder_path",
+                        lambda run_dir, plan_path, out, run="adhoc", notes=None: built.append(notes))
+    for stage in ("segment", "trace", "assess"):
+        monkeypatch.setitem(pipeline.NODES, stage, lambda state: {})
+    graph = pipeline.build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "approve-with-notes"}}
+
+    graph.invoke({"run": "t", "run_dir": str(tmp_path)}, config)
+    graph.invoke(Command(resume={"approved": True, "notes": "Refuse foreign-currency POs."}), config)
+    assert built == ["Refuse foreign-currency POs."]
+
+    assert build_prompt(None) == build_prompt("  ") == BUILD_PROMPT
+    request = build_prompt("Refuse foreign-currency POs.")
+    assert request.startswith(BUILD_PROMPT) and request.endswith("Refuse foreign-currency POs.")
+
+
 def test_errors_accumulate_rather_than_overwrite():
     from odoo_miner.pipeline.state import _extend
 
@@ -689,6 +721,17 @@ def test_citation_check_flags_missing_files_and_lines(fake_source):
     )
     assert any("nope.py does not exist" in p for p in problems)
     assert any(":999 is past the end" in p for p in problems)
+
+
+def test_citation_check_reads_paths_under_the_planners_mount(fake_source):
+    """The planner sees Odoo at `/odoo/` and often cites it that way; those must be checked too."""
+    from odoo_miner.agents.planner import check_citations
+
+    assert check_citations(
+        "`_prepare_invoice` (`/odoo/addons/purchase/models/purchase_order.py:12`)", root=fake_source
+    ) == []
+    [problem] = check_citations("(`/odoo/addons/purchase_order_line.py:140-150`)", root=fake_source)
+    assert problem == "addons/purchase_order_line.py does not exist."
 
 
 def test_unverified_citations_reach_the_plan_contract():

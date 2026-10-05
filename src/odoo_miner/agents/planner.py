@@ -16,9 +16,10 @@ from .config import chat_model, load_prompt, settings, trace_config
 from .contracts import Plan
 from .tools import odoo_source
 
-# `addons/x/y.py`, `addons/x/y.xml:56`, `odoo/addons/base/z.py:10-20`
+# `addons/x/y.py`, `addons/x/y.xml:56`, `odoo/addons/base/z.py:10-20`, and the
+# same paths as the planner sees them, under its `/odoo/` mount.
 _CITATION_RE = re.compile(
-    r"(?<![\w/])((?:odoo/)?addons/[\w./-]+?\.(?:py|xml))(?::(\d+)(?:-(\d+))?)?"
+    r"(?<![\w/])(?:/odoo/)?((?:odoo/)?addons/[\w./-]+?\.(?:py|xml))(?::(\d+)(?:-(\d+))?)?"
 )
 # A backticked identifier, written plainly or as a call: `name`, `Model._post()`.
 _IDENTIFIER_RE = re.compile(r"`([A-Za-z_][\w.]*)(?:\(\))?`")

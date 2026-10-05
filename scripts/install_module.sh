@@ -21,8 +21,11 @@ fi
 trap 'docker compose start odoo >/dev/null 2>&1 || true' ERR
 
 docker compose up -d --wait db
+# Odoo's web server is stopped during the install: a server loading the same
+# database can collide with the install's writes to the module tables.
+docker compose stop odoo
 # -i installs it if it is new, -u updates it if it is already installed.
 docker compose run --rm odoo odoo -d "$DB" -i "$MODULE" -u "$MODULE" --stop-after-init
-docker compose restart odoo
+docker compose start odoo
 ./scripts/wait_for_odoo.sh
 echo "Installed $MODULE in $DB"

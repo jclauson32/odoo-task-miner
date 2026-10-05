@@ -7,6 +7,7 @@ the agent can read, including the failure, rather than raising.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -16,18 +17,27 @@ from pathlib import Path
 
 from ..config import settings
 
-COMPOSE = ["docker", "compose"]
 DEFAULT_TIMEOUT = 900
 # docker-compose.yml and scripts/ live at the repository root; run from there
 # whatever the caller's working directory is.
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RESTORE_HOOK = str(REPO_ROOT / "scripts" / "restore_db.sh")
+# The same scripts a person runs, so the builder installs and tests a module
+# exactly the way the demo and the runbook do.
+INSTALL_SCRIPT = str(REPO_ROOT / "scripts" / "install_module.sh")
+TEST_SCRIPT = str(REPO_ROOT / "scripts" / "test_module.sh")
 
 
-def _run(cmd: list[str], timeout: int = DEFAULT_TIMEOUT, cwd: Path | None = REPO_ROOT) -> tuple[int, str]:
+def _run(
+    cmd: list[str],
+    timeout: int = DEFAULT_TIMEOUT,
+    cwd: Path | None = REPO_ROOT,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str]:
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, cwd=str(cwd) if cwd else None
+            cmd, capture_output=True, text=True, timeout=timeout,
+            cwd=str(cwd) if cwd else None, env={**os.environ, **env} if env else None,
         )
     except FileNotFoundError:
         return 127, f"command not found: {cmd[0]}"
@@ -39,21 +49,17 @@ def _run(cmd: list[str], timeout: int = DEFAULT_TIMEOUT, cwd: Path | None = REPO
 def install_module(name: str) -> str:
     """Install or update an Odoo module in the demo database, then restart Odoo.
 
+    Returns once Odoo answers again, so the next tool never races its start-up.
+
     Args:
         name: module directory name under addons/, e.g. "odoo_miner_bill_date".
 
     Returns:
         "ok" plus the tail of Odoo's log, or the failure output.
     """
-    s = settings()
-    code, output = _run(
-        COMPOSE + ["run", "--rm", "odoo", "odoo", "-d", s.odoo_db, "-i", name, "--stop-after-init"]
-    )
+    code, output = _run(["bash", INSTALL_SCRIPT, name], env={"DB": settings().odoo_db})
     if code != 0:
         return f"install failed (exit {code}):\n{output[-4000:]}"
-    restart_code, restart_output = _run(COMPOSE + ["restart", "odoo"], timeout=180)
-    if restart_code != 0:
-        return f"module installed but Odoo restart failed:\n{restart_output[-2000:]}"
     return f"ok: {name} installed and Odoo restarted.\n{output[-1500:]}"
 
 
@@ -77,11 +83,7 @@ def run_module_tests(name: str, run_dir: str | None = None) -> str:
     Returns:
         Whether the tests passed and how many ran, with the failing lines when not.
     """
-    s = settings()
-    code, output = _run(
-        COMPOSE + ["run", "--rm", "odoo", "odoo", "-d", s.odoo_db, "-i", name, "-u", name,
-                   "--test-tags", f"/{name}", "--stop-after-init"]
-    )
+    code, output = _run(["bash", TEST_SCRIPT, name], env={"DB": settings().odoo_db})
     log_dir = Path(run_dir) if run_dir else (REPO_ROOT / "out" / name)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "tests.log"
@@ -134,7 +136,7 @@ def replay_workflow(
         return f"did not replay: restoring the database failed:\n{output[-2000:]}"
     if module:
         installed = install_module(module)
-        if installed.startswith(("install failed", "module installed but")):
+        if installed.startswith("install failed"):
             return f"did not replay: {installed}"
 
     try:

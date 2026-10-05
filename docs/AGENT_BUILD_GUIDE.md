@@ -577,8 +577,8 @@ functions they wrap live in `tools/odoo_ops.py` and `tools/delivery.py`:
 
 | Tool the agent sees | Does |
 |---|---|
-| `install_module()` | `docker compose run --rm odoo odoo -d demo -i <module> --stop-after-init`, then restarts Odoo |
-| `run_module_tests()` | the same with `--test-tags /<module>`; the full log goes to `/run/tests.log`, never into the module |
+| `install_module()` | `scripts/install_module.sh <module>`: stops Odoo, installs or updates the module, starts Odoo and waits for it |
+| `run_module_tests()` | `scripts/test_module.sh <module>`: the same with `--test-tags /<module>`; the full log goes to `/run/tests.log`, never into the module |
 | `replay_workflow(recording, output)` | restore the database, install the module, `odoo-miner run <recording> -d <output> --screenshots` |
 | `measure_effort(output)` | segment and score the after-run; returns total effort |
 | `git_push_feature_branch(module_name, title)` | commits `addons/<module>` on `feat/<module>` in a temporary worktree and pushes; never the base branch, never your checkout |

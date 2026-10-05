@@ -74,6 +74,7 @@ def approve_node(state: PipelineState) -> dict:
         "expected_steps_after": plan.expected_steps_after,
         "acceptance_criteria": plan.acceptance_criteria,
         "risks": plan.risks,
+        "unverified_citations": plan.unverified_citations,
         "plan_md": str(_run_dir(state) / "plan.md"),
     })
     if isinstance(decision, bool):           # tolerate a bare yes/no

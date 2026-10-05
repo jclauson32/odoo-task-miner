@@ -560,3 +560,55 @@ class TestViewSearch:
             for seg in assessment.segments for s in seg.steps if s.signals.get("hidden_field")
         ]
         assert "sales price" in hidden
+
+
+# ----------------------------------------------------------------- planner citation check
+
+
+@pytest.fixture
+def fake_source(tmp_path):
+    root = tmp_path / "odoo"
+    models = root / "addons" / "purchase" / "models"
+    models.mkdir(parents=True)
+    (models / "purchase_order.py").write_text(
+        "class PurchaseOrder:\n" + "    pass\n" * 10 + "    def _prepare_invoice(self):\n        return {}\n"
+    )
+    views = root / "addons" / "product" / "views"
+    views.mkdir(parents=True)
+    (views / "product_views.xml").write_text('<record id="product_template_form_view"/>\n')
+    return root
+
+
+def test_citation_check_passes_real_citations(fake_source):
+    from odoo_miner.agents.planner import check_citations
+
+    text = (
+        "`_prepare_invoice()` (`addons/purchase/models/purchase_order.py:12`) never sets it; "
+        "the form is `product.product_template_form_view` (`addons/product/views/product_views.xml:1`)."
+    )
+    assert check_citations(text, root=fake_source) == []
+
+
+def test_citation_check_flags_a_misfiled_identifier(fake_source):
+    """The planner once cited the product list view in the form-view file."""
+    from odoo_miner.agents.planner import check_citations
+
+    text = "the list view (`product_template_tree_view`, `addons/product/views/product_views.xml`)"
+    [problem] = check_citations(text, root=fake_source)
+    assert "product_template_tree_view" in problem and "does not appear" in problem
+
+
+def test_citation_check_flags_missing_files_and_lines(fake_source):
+    from odoo_miner.agents.planner import check_citations
+
+    problems = check_citations(
+        "see `addons/purchase/models/nope.py` and `addons/purchase/models/purchase_order.py:999`",
+        root=fake_source,
+    )
+    assert any("nope.py does not exist" in p for p in problems)
+    assert any(":999 is past the end" in p for p in problems)
+
+
+def test_unverified_citations_reach_the_plan_contract():
+    plan = Plan(decision="no_change", summary="s", unverified_citations=["x"])
+    assert Plan.model_validate_json(plan.model_dump_json()).unverified_citations == ["x"]

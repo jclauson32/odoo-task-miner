@@ -331,6 +331,7 @@ def plan(
     result = run_planner_path(run_dir, target, run=run_name)
     console.print(f"[green]✓[/green] decision: [bold]{result.decision}[/bold] → {target}")
     console.print(escape(result.summary))
+    _show_citation_check(result.unverified_citations)
 
 
 def _show_pending(payload: dict) -> None:
@@ -353,6 +354,16 @@ def _show_pending(payload: dict) -> None:
     for key in ("acceptance_criteria", "risks"):
         for item in payload.get(key) or []:
             console.print(f"  {key[:-1]}: {escape(str(item))}")
+    _show_citation_check(payload.get("unverified_citations") or [])
+
+
+def _show_citation_check(problems: list[str]) -> None:
+    if problems:
+        console.print("  [yellow]Citations to check by hand before approving:[/yellow]")
+        for problem in problems:
+            console.print(f"    - {escape(problem)}")
+    else:
+        console.print("  [green]Every file and line the plan cites was found in the source.[/green]")
 
 
 @app.command()

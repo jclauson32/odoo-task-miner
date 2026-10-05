@@ -220,6 +220,7 @@ class Plan(BaseModel):
     expected_steps_after: int
     acceptance_criteria: list[str]     # testable statements
     risks: list[str]
+    unverified_citations: list[str]    # filled by code, not the model: see check_citations
 
 class BuildResult(BaseModel):
     branch: str; commit: str
@@ -495,6 +496,15 @@ def approve_node(state):
 The CLI shows the plan and resumes with
 `graph.invoke(Command(resume={"approved": True, "notes": ""}), config)`.
 A run paused at approval shows `result["__interrupt__"]`.
+
+After the model answers, `planner.check_citations` checks every `addons/...`
+reference in the plan and `plan.md` mechanically - the file exists, a cited line
+is in range, and the backticked identifier written just before a path occurs in
+that file - and stores what it could not confirm in `unverified_citations`,
+which the approval gate shows. On the reference run the planner cited five
+places; four were exact and one named the right view in the wrong file
+(`product_template_tree_view` lives in `product_template_views.xml`), which
+the check flags.
 
 **Done when:** the planner produces a valid `Plan` citing real files, `plan.md`
 reads well to a non-developer, and the graph pauses for approval.

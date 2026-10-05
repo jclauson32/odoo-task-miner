@@ -141,6 +141,9 @@ class Plan(BaseModel):
     expected_steps_after: int = 0
     acceptance_criteria: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
+    # Filled in by code after the model answers (planner.check_citations), so
+    # the approver sees which file references could not be confirmed.
+    unverified_citations: list[str] = Field(default_factory=list)
 
 
 class BuildResult(BaseModel):

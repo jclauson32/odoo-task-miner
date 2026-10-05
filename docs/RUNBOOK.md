@@ -68,14 +68,16 @@ odoo-miner run tests/fixtures/rfq_to_payment.json -d out/demo \
 ```
 
 What happens: the pre-hook resets the database to the snapshot (Odoo
-restarts), then a headless Chrome replays the recording step by step against it,
-capturing the backend calls each one makes. About 50 seconds.
+restarts, so Docker prints a dozen container status lines), then a headless
+Chrome replays the recording step by step against it, capturing the backend
+calls each one makes. About 50 seconds. It ends with:
 
 ```
-✓ 54 steps → out/demo/clicks.json
 Restored demo from demo_snapshot
+Replaying tests/fixtures/rfq_to_payment.json …
+Completed: 57 backend calls → …/out/demo/network.json
 ✓ 57 backend calls → out/demo/network.json
-✓ 54 steps, 12 with backend writes → out/demo/session.json
+✓ 54 steps, 11 with backend writes → out/demo/session.json
 ```
 
 The replay is deterministic: run it twice and every step makes the same
@@ -126,7 +128,9 @@ Approve with:  odoo-miner analyze out/demo --approve --thread demo
 Reject with:   odoo-miner analyze out/demo --reject --thread demo --notes "why"
 ```
 
-The model's wording differs between runs; the shape does not. Read the plan
+The model's wording differs between runs, and so can the decision itself on
+borderline friction (five runs on this recording: no_change ×3, data_fix,
+customize); the bill-date control was refused every time. Read the plan
 before deciding:
 
 ```bash

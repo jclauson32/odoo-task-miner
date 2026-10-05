@@ -654,3 +654,18 @@ def test_report_needs_a_plan(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="plan.json"):
         compose_report(tmp_path)
+
+
+def test_before_and_after_screenshots_get_distinct_names(smtp_server, tmp_path):
+    before = tmp_path / "run" / "screenshots" / "step-006.png"
+    after = tmp_path / "run" / "after" / "screenshots" / "step-006.png"
+    for path in (before, after):
+        path.parent.mkdir(parents=True)
+        path.write_bytes(_png())
+
+    result = delivery.send_report_email("s", "b", [str(before), str(after)])
+
+    message = email.message_from_bytes(smtp_server[0].content, policy=email.policy.default)
+    names = [part.get_filename() for part in message.iter_attachments()]
+    assert names == ["run-screenshots-step-006.png", "after-screenshots-step-006.png"], names
+    assert "run-screenshots-step-006.png" in result

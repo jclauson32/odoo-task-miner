@@ -26,6 +26,14 @@ from .models import ClickLog, NetworkLog, Session
 from .recorder import RecordingError, load_recording
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Parse Odoo workflow recordings for the analysis agents.")
+
+
+@app.callback()
+def _load_settings() -> None:
+    """Load .env before any command, so every run - traces included - sees it."""
+    from .agents.config import load_env
+
+    load_env()
 console = Console()
 err = Console(stderr=True)
 
@@ -444,7 +452,13 @@ def analyze(
 
     with sqlite_checkpointer(run_dir / "pipeline.sqlite") as checkpointer:
         graph = build_graph(checkpointer=checkpointer, until=until)
-        config = {"configurable": {"thread_id": thread_id}}
+        # Named and tagged so the whole run is one findable tree in LangSmith.
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "run_name": f"odoo-miner analyze {name}",
+            "metadata": {"run": name},
+            "tags": ["odoo-miner", "pipeline"],
+        }
 
         if approve is None:
             state = {

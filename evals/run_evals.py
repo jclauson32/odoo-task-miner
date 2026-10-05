@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from odoo_miner.agents.assessor import assess_deterministic  # noqa: E402
+from odoo_miner.agents.config import load_env  # noqa: E402
 from odoo_miner.agents.contracts import SegmentLog  # noqa: E402
 from odoo_miner.agents.segmenter import run_segmenter  # noqa: E402
 from odoo_miner.models import Session  # noqa: E402
@@ -298,6 +299,7 @@ def main() -> int:
     )
     parser.add_argument("--prefix", default="segmenter-v1")
     args = parser.parse_args()
+    load_env()            # LangSmith credentials come from .env
 
     if args.command == "push":
         push_datasets()

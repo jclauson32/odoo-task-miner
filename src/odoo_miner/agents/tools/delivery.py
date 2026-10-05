@@ -302,6 +302,29 @@ def send_report_email(subject: str, body: str, attachments: list[str] | None = N
     return result
 
 
+def _attachment_names(paths: list[Path]) -> dict[Path, str]:
+    """A distinct file name per attachment.
+
+    Before and after screenshots share a name (step-006.png); an inbox shows
+    two identical names. Repeated names take their parent folders as a prefix,
+    as many as it needs: screenshots-step-006.png, after-screenshots-step-006.png.
+    """
+    names: dict[Path, str] = {}
+    for path in paths:
+        clashing = [other for other in paths if other.name == path.name and other != path]
+        if not clashing:
+            names[path] = path.name
+            continue
+        for depth in range(1, len(path.parts)):
+            name = "-".join(path.parts[-depth - 1:])
+            if all("-".join(other.parts[-depth - 1:]) != name for other in clashing):
+                names[path] = name
+                break
+        else:
+            names[path] = path.name
+    return names
+
+
 def _build_message(
     sender: str, to: str, subject: str, body: str, attachments: list[str]
 ) -> tuple[EmailMessage, list[str], list[str]]:
@@ -317,6 +340,7 @@ def _build_message(
     attached: list[str] = []
     skipped: list[str] = []
     budget = MAX_TOTAL_ATTACHMENTS_MB * 1024 * 1024
+    names = _attachment_names([Path(raw) for raw in attachments])
     for raw in attachments:
         path = Path(raw)
         if not path.is_file():
@@ -333,13 +357,14 @@ def _build_message(
         content_type, _ = mimetypes.guess_type(path.name)
         maintype, subtype = (content_type or "application/octet-stream").split("/", 1)
         data = path.read_bytes()
+        filename = names[path]
         if maintype == "text":
             message.add_attachment(
-                data.decode("utf-8", errors="replace"), subtype=subtype, filename=path.name
+                data.decode("utf-8", errors="replace"), subtype=subtype, filename=filename
             )
         else:
-            message.add_attachment(data, maintype=maintype, subtype=subtype, filename=path.name)
-        attached.append(path.name)
+            message.add_attachment(data, maintype=maintype, subtype=subtype, filename=filename)
+        attached.append(filename)
     return message, attached, skipped
 
 

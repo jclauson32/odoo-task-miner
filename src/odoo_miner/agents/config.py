@@ -28,14 +28,24 @@ REQUEST_TIMEOUT_S = 120
 MAX_RETRIES = 2
 
 
-def _load_dotenv_once() -> None:
-    """Load .env from the project root, if python-dotenv is available."""
+@lru_cache(maxsize=1)
+def load_env() -> None:
+    """Load .env from the project root into the environment, once per process.
+
+    Called at CLI start-up, before any command runs: LangChain decides whether
+    to trace a run when the run starts, so loading .env later - say, when the
+    first stage builds its model - leaves the pipeline untraced in a fresh
+    terminal. Variables already set in the environment win over the file.
+    """
     try:
         from dotenv import load_dotenv
     except ImportError:          # the library is optional for deterministic use
         return
     root = Path(__file__).resolve().parents[3]
     load_dotenv(root / ".env", override=False)
+
+
+_load_dotenv_once = load_env
 
 
 class Settings(BaseModel):

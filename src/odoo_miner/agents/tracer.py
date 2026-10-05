@@ -9,11 +9,19 @@ and writes the explanation.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..models import NetworkCall, Session, SessionClick
 from .config import load_prompt, model_for, trace_config
-from .contracts import CodeRef, QueryRef, SegmentKind, SegmentLog, TracedSegment, TraceLog
+from .contracts import (
+    CodeRef,
+    QueryRef,
+    SegmentKind,
+    SegmentLog,
+    TracedSegment,
+    TracedSegmentDraft,
+    TraceLog,
+)
 from .tools import odoo_source
 
 # Calls the framework makes on its own; not something the user looked up.
@@ -78,7 +86,7 @@ def retrievals_for(clicks: list[SessionClick]) -> list[QueryRef]:
     return out
 
 
-def _first_list(args: Optional[list]) -> Optional[list]:
+def _first_list(args: list | None) -> list | None:
     if not args:
         return None
     for arg in args:
@@ -162,7 +170,7 @@ def render_segment(segment, clicks: list[SessionClick], refs: list[CodeRef], que
     return "\n".join(lines)
 
 
-def build_tracer(model: Optional[str] = None):
+def build_tracer(model: str | None = None):
     """The LangChain agent, with the source-search tools."""
     from langchain.agents import create_agent
 
@@ -170,7 +178,7 @@ def build_tracer(model: Optional[str] = None):
         model=model or model_for("tracer"),
         tools=odoo_source.TOOLS,
         system_prompt=load_prompt("tracer"),
-        response_format=TracedSegment,
+        response_format=TracedSegmentDraft,
         name="tracer_agent",
     )
 
@@ -186,14 +194,21 @@ def trace_segment(segment, session: Session, agent: Any = None, run: str = "adho
         {"messages": [{"role": "user", "content": render_segment(segment, clicks, refs, queries)}]},
         config=trace_config(run, "tracer", segment=segment.segment_id),
     )
-    traced = result["structured_response"]
-    if not isinstance(traced, TracedSegment):
-        traced = TracedSegment.model_validate(traced)
+    draft = result["structured_response"]
+    if not isinstance(draft, TracedSegmentDraft):
+        draft = TracedSegmentDraft.model_validate(draft)
 
     # The agent may correct the kind and the explanation, but references it
-    # invented are dropped: a CodeRef has to exist on disk.
-    good, _bad = verify_refs(traced.actions)
-    return traced.model_copy(update={"segment_id": segment.segment_id, "actions": good or refs})
+    # invented are dropped: a CodeRef has to exist on disk. Retrievals are the
+    # ones computed from the session, not anything the model retyped.
+    good, _bad = verify_refs(draft.actions)
+    return TracedSegment(
+        segment_id=segment.segment_id,
+        kind=draft.kind,
+        actions=good or refs,
+        retrievals=queries,
+        explanation=draft.explanation,
+    )
 
 
 def run_tracer(segments: SegmentLog, session: Session, agent: Any = None, run: str = "adhoc") -> TraceLog:

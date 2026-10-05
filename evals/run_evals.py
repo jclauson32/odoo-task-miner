@@ -20,15 +20,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from odoo_miner.agents.assessor import assess_deterministic          # noqa: E402
-from odoo_miner.agents.contracts import SegmentLog                    # noqa: E402
-from odoo_miner.agents.segmenter import run_segmenter                 # noqa: E402
-from odoo_miner.models import Session                                 # noqa: E402
+from odoo_miner.agents.assessor import assess_deterministic  # noqa: E402
+from odoo_miner.agents.contracts import SegmentLog  # noqa: E402
+from odoo_miner.agents.segmenter import run_segmenter  # noqa: E402
+from odoo_miner.models import Session  # noqa: E402
 
 DATASETS = {
     "odoo-miner/segmenter": {
         "gold": ROOT / "evals/datasets/rfq_to_payment.segments.json",
-        "session": ROOT / "out/rfq_to_payment/session.json",
+        "session": (
+            ROOT / "out/rfq_to_payment/session.json"
+            if (ROOT / "out/rfq_to_payment/session.json").exists()
+            else ROOT / "tests/fixtures/rfq_to_payment.session.json"
+        ),
     },
 }
 
@@ -85,7 +89,7 @@ def label_quality(outputs: dict, reference_outputs: dict) -> dict:
     if not segments:
         return {"key": "label_quality", "score": 0.0, "comment": "no segments"}
     labels = [(s.get("label") or "").strip() for s in segments]
-    specific = [l for l in labels if len(l.split()) >= 3]
+    specific = [label for label in labels if len(label.split()) >= 3]
     unique = len(set(labels)) == len(labels)
     score = (len(specific) / len(labels)) * (1.0 if unique else 0.5)
     return {

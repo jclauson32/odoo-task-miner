@@ -15,9 +15,9 @@ import ast
 import json
 import re
 import subprocess
+from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Optional
 
 from ..config import settings
 from ..contracts import CodeRef
@@ -172,7 +172,7 @@ _BUTTON_RE = re.compile(r"<button\b[^>]*>", re.DOTALL)
 _ATTR_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
 
-def find_button(name: str, model: Optional[str] = None) -> list[CodeRef]:
+def find_button(name: str, model: str | None = None) -> list[CodeRef]:
     """Find view buttons whose `name` attribute is `name`.
 
     A button's `type` says what the name means: `object` is a Python method on
@@ -213,7 +213,7 @@ def find_button(name: str, model: Optional[str] = None) -> list[CodeRef]:
     return refs
 
 
-def read_source(file: str, start: int = 1, end: Optional[int] = None) -> str:
+def read_source(file: str, start: int = 1, end: int | None = None) -> str:
     """Read a bounded range of lines from Odoo's source or this project's addons.
 
     Args:
@@ -266,51 +266,79 @@ def _resolve_readable(file: str) -> Path:
 
 
 _FIELD_RE = re.compile(r'<field\b[^>]*\bname="([^"]+)"[^>]*>?', re.DOTALL)
+_RECORD_SPLIT_RE = re.compile(r"(?=<record\b)")
+_PAGE_RE = re.compile(r'<page\b[^>]*\bstring="([^"]*)"')
 
 
-def find_view_fields(model: str, field: Optional[str] = None) -> list[dict]:
-    """Where a model's form view puts its fields, and what hides them.
+def find_view_fields(model: str, field: str | None = None) -> list[dict]:
+    """Where a model's views put its fields, and what hides them.
 
     Used to tell whether a field the user edited was behind a notebook page or
     conditionally invisible - both make a step harder than it looks.
+
+    A view declares its model as element text (`<field name="model">a.b</field>`),
+    not as an attribute, and one XML file usually holds views for several
+    models - so this matches on the element form and scopes each scan to the
+    `<record>` that declares the model asked for.
 
     Args:
         model: Odoo model name, e.g. "account.move".
         field: optional field name to restrict the answer to.
 
     Returns:
-        One dict per field occurrence: file, line, page (notebook page string
-        label, if any) and invisible (the modifier, if any).
+        One dict per field occurrence: field, string (its label, when the view
+        sets one), file, line, page (the notebook page's label, if any) and
+        invisible (the modifier, if any).
     """
     root = source_root()
-    stem = model.replace(".", "_")
+    declaration = f'name="model">{model}<'
     out: list[dict] = []
 
-    for path in _grep_files(f'"{model}"', root, include="*.xml"):
-        if stem not in path.name:
-            continue
+    for path in _grep_files(f">{model}<", root, include="*.xml"):
         text = _safe_read(path)
-        page: Optional[str] = None
-        for number, line in enumerate(text.splitlines(), start=1):
-            if "<page" in line:
-                label = re.search(r'string="([^"]*)"', line)
-                page = label.group(1) if label else page
-            if "</notebook>" in line:
-                page = None
-            match = _FIELD_RE.search(line)
-            if not match:
-                continue
-            name = match.group(1)
-            if field and name != field:
-                continue
-            invisible = re.search(r'invisible="([^"]*)"', line)
-            out.append({
-                "field": name,
-                "file": relative(path, root),
-                "line": number,
-                "page": page,
-                "invisible": invisible.group(1) if invisible else None,
-            })
+        if declaration not in text:
+            continue
+        offset = 0
+        for record in _RECORD_SPLIT_RE.split(text):
+            length = len(record)
+            if declaration in record:
+                out += _fields_in_record(record, path, root, offset, text, field)
+            offset += length
+    return out
+
+
+def _fields_in_record(
+    record: str, path: Path, root: Path, offset: int, whole: str, wanted: str | None
+) -> list[dict]:
+    """Fields inside one <record>, with the notebook page each one sits in."""
+    base_line = whole.count("\n", 0, offset) + 1
+    out: list[dict] = []
+    page: str | None = None
+
+    for number, line in enumerate(record.splitlines()):
+        if "<page" in line:
+            label = _PAGE_RE.search(line)
+            if label:
+                page = label.group(1)
+        if "</notebook>" in line:
+            page = None
+
+        match = _FIELD_RE.search(line)
+        if not match:
+            continue
+        name = match.group(1)
+        if name == "model" or (wanted and name != wanted):
+            continue
+        label = re.search(r'string="([^"]*)"', line)
+        invisible = re.search(r'invisible="([^"]*)"', line)
+        out.append({
+            "field": name,
+            "string": label.group(1) if label else None,
+            "file": relative(path, root),
+            "line": base_line + number,
+            "page": page,
+            "invisible": invisible.group(1) if invisible else None,
+        })
     return out
 
 
@@ -375,6 +403,33 @@ def _fetch_installed_modules() -> set[str]:
     return {r["name"] for r in records if r.get("name")}
 
 
+def find_view_pages(model: str) -> list[str]:
+    """The notebook page labels a model's views define, e.g. "General Information".
+
+    A click on one of these is a tab switch. The Recorder records Odoo 18 tabs
+    as positional selectors (`div.o_content li:nth-of-type(1) > a`) with no
+    class to match on, so the label is the only reliable signal.
+
+    Args:
+        model: Odoo model name, e.g. "product.template".
+
+    Returns:
+        Page labels, de-duplicated.
+    """
+    root = source_root()
+    declaration = f'name="model">{model}<'
+    pages: set[str] = set()
+
+    for path in _grep_files(f">{model}<", root, include="*.xml"):
+        text = _safe_read(path)
+        if declaration not in text:
+            continue
+        for record in _RECORD_SPLIT_RE.split(text):
+            if declaration in record:
+                pages.update(_PAGE_RE.findall(record))
+    return sorted(pages)
+
+
 # Functions handed to agents. create_agent accepts plain callables; the
 # docstrings above are the tool descriptions the model reads.
-TOOLS = [find_method, find_button, read_source, find_view_fields]
+TOOLS = [find_method, find_button, read_source, find_view_fields, find_view_pages]

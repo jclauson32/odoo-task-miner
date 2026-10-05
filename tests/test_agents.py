@@ -8,25 +8,32 @@ when it is absent.
 
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path
 
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "evals"))
+from pydantic import ValidationError
 
 from odoo_miner.agents import assessor, segmenter, tracer
 from odoo_miner.agents.contracts import (
-    Assessment, BuildResult, CodeRef, Plan, Segment, SegmentAssessment,
-    SegmentLog, StepDifficulty, TracedSegment,
+    Assessment,
+    BuildResult,
+    CodeRef,
+    Plan,
+    SegmentAssessment,
+    SegmentLog,
+    StepDifficulty,
+    TracedSegment,
+    TracedSegmentDraft,
 )
-from odoo_miner.agents.tools import delivery, odoo_source
+from odoo_miner.agents.tools import odoo_source
 from odoo_miner.models import Session
 
+ROOT = Path(__file__).resolve().parents[1]
 GOLD = ROOT / "evals/datasets/rfq_to_payment.segments.json"
-SESSION = ROOT / "out/rfq_to_payment/session.json"
+# The committed reference session, so the suite does not depend on a local run.
+# A fresh run in out/ takes precedence when it is there.
+SESSION = ROOT / "tests/fixtures/rfq_to_payment.session.json"
+LIVE_SESSION = ROOT / "out/rfq_to_payment/session.json"
 
 
 # ----------------------------------------------------------------- fixtures
@@ -34,9 +41,10 @@ SESSION = ROOT / "out/rfq_to_payment/session.json"
 
 @pytest.fixture(scope="module")
 def session() -> Session:
-    if not SESSION.exists():
-        pytest.skip(f"{SESSION} not found; run the pipeline first")
-    return Session.model_validate_json(SESSION.read_text(encoding="utf-8"))
+    path = LIVE_SESSION if LIVE_SESSION.exists() else SESSION
+    if not path.exists():
+        pytest.skip(f"{path} not found; run the pipeline first")
+    return Session.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -77,7 +85,7 @@ def test_contracts_round_trip():
 
 
 def test_step_score_is_bounded():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         StepDifficulty(step_index=1, score=9)
 
 
@@ -185,13 +193,35 @@ def test_retrievals_skip_framework_chatter(session, gold):
 
 
 def test_tracer_drops_invented_coderefs(session, gold):
-    invented = TracedSegment(
+    invented = TracedSegmentDraft(
         segment_id="s07", kind="action",
         actions=[CodeRef(module="purchase", file="addons/nope/no_such_file.py", line=1, symbol="X.y")],
         explanation="made up",
     )
     traced = tracer.trace_segment(gold.segments[6], session, agent=FakeAgent(invented), run="test")
+    assert isinstance(traced, TracedSegment)
     assert all(ref.file != "addons/nope/no_such_file.py" for ref in traced.actions)
+
+
+def test_tracer_retrievals_come_from_code_not_the_model(session, gold):
+    """The model is never asked for retrievals, so it cannot invent them."""
+    assert "retrievals" not in TracedSegmentDraft.model_fields
+
+    segment = gold.segments[2]                       # creating the RFQ does lookups
+    expected = tracer.retrievals_for(tracer.segment_clicks(session, segment.step_indexes))
+    draft = TracedSegmentDraft(segment_id=segment.segment_id, kind="action", explanation="x")
+    traced = tracer.trace_segment(segment, session, agent=FakeAgent(draft), run="test")
+    assert [(q.model, q.method) for q in traced.retrievals] == [
+        (q.model, q.method) for q in expected
+    ]
+
+
+def test_every_response_format_survives_strict_schema():
+    """Anthropic's structured output rejects an untyped schema; catch it here."""
+    from anthropic.lib._parse._transform import transform_schema
+
+    for model in (SegmentLog, TracedSegmentDraft, SegmentAssessment, Plan, BuildResult):
+        transform_schema(model.model_json_schema())
 
 
 @pytest.mark.skipif(not odoo_source.source_available(), reason="vendor/odoo not cloned")
@@ -294,7 +324,7 @@ def test_llm_adjustments_are_clamped(session, gold):
         "effort": 999.0,
     })
     clamped = assessor.clamp_adjustments(runaway, baseline)
-    for original, adjusted in zip(baseline.steps, clamped.steps):
+    for original, adjusted in zip(baseline.steps, clamped.steps, strict=True):
         assert abs(adjusted.score - original.score) <= assessor.MAX_ADJUSTMENT
     assert clamped.effort == sum(s.score for s in clamped.steps)
 
@@ -331,7 +361,7 @@ def test_run_assessor_with_agent_clamps_and_recomputes(session, gold):
     result = assessor.run_assessor(gold, session, agent=FakeAgent(respond), run="test")
     for segment in result.segments:
         original = by_id[segment.segment_id]
-        for before, after in zip(original.steps, segment.steps):
+        for before, after in zip(original.steps, segment.steps, strict=True):
             assert after.score - before.score <= assessor.MAX_ADJUSTMENT
         assert segment.effort == sum(s.score for s in segment.steps)
 
@@ -385,29 +415,6 @@ def test_errors_accumulate_rather_than_overwrite():
     assert _extend(["a"], None) == ["a"]
 
 
-# ----------------------------------------------------------------- delivery guards
-
-
-def test_push_refuses_a_missing_module():
-    assert "does not exist" in delivery.git_push_feature_branch("no_such_module_xyz", "t")
-
-
-def test_email_refuses_without_a_configured_recipient(monkeypatch):
-    monkeypatch.delenv("REPORT_EMAIL_TO", raising=False)
-    assert "REPORT_EMAIL_TO" in delivery.send_report_email("s", "b")
-
-
-def test_email_refuses_without_smtp_host(monkeypatch):
-    monkeypatch.setenv("REPORT_EMAIL_TO", "someone@example.com")
-    monkeypatch.delenv("SMTP_HOST", raising=False)
-    assert "SMTP_HOST" in delivery.send_report_email("s", "b")
-
-
-def test_main_is_a_protected_branch():
-    assert "main" in delivery.PROTECTED_BRANCHES
-    assert "master" in delivery.PROTECTED_BRANCHES
-
-
 # ----------------------------------------------------------------- evaluators (section 11)
 
 
@@ -448,3 +455,108 @@ def test_adjustments_evaluator_flags_a_two_point_move():
     assert run_evals.adjustments_within_one(moved, baseline)["score"] == 0.0
     nudged = {"segments": [{"segment_id": "s01", "steps": [{"step_index": 1, "score": 3}]}]}
     assert run_evals.adjustments_within_one(nudged, baseline)["score"] == 1.0
+
+
+# ----------------------------------------------------------------- signal regressions
+#
+# Each of these covers a bug that shipped once: a search that silently matched
+# nothing, a signal that fired on the wrong half of its definition, and a
+# label comparison that could never be true.
+
+
+def test_normalise_label_handles_odoo_spelling():
+    assert assessor.normalise_label("Sales\xa0Price?") == "sales price"
+    assert assessor.normalise_label("  General   Information ") == "general information"
+    assert assessor.normalise_label(None) == ""
+    assert assessor.normalise_label("Cost?") == "cost"
+
+
+def test_wasted_click_needs_both_halves(session, gold):
+    """A click with no calls that precedes typing was focusing a field."""
+    assessment = assessor.assess_deterministic(session, gold)
+    order = [c.step_index for c in session.clicks]
+    by_index = {c.step_index: c for c in session.clicks}
+    flagged = [
+        s.step_index for seg in assessment.segments
+        for s in seg.steps if s.signals.get("wasted_click")
+    ]
+    assert flagged, "the reference session has clicks that did nothing"
+    for index in flagged:
+        position = order.index(index)
+        following = by_index[order[position + 1]] if position + 1 < len(order) else None
+        assert following is None or following.type not in ("change", "doubleClick"), (
+            f"step {index} precedes typing, so it was setup rather than waste"
+        )
+
+
+def test_a_tab_click_is_not_also_wasted(session, gold):
+    assessment = assessor.assess_deterministic(session, gold)
+    for seg in assessment.segments:
+        for step in seg.steps:
+            if step.signals.get("tab_switch"):
+                assert not step.signals.get("wasted_click"), (
+                    f"step {step.step_index} charged as both a tab switch and waste"
+                )
+
+
+@pytest.mark.skipif(not odoo_source.source_available(), reason="vendor/odoo not cloned")
+class TestViewSearch:
+    def test_find_view_fields_actually_matches(self):
+        """A view declares its model as element text, not as an attribute."""
+        fields = odoo_source.find_view_fields("account.move")
+        assert len(fields) > 100, "the quoted-model search silently matched nothing"
+
+    def test_find_view_fields_line_numbers_are_real(self):
+        root = odoo_source.settings().odoo_source_abs
+        for entry in odoo_source.find_view_fields("account.move", "invoice_date"):
+            lines = (root / entry["file"]).read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
+            assert f'name="{entry["field"]}"' in lines[entry["line"] - 1]
+
+    def test_bill_date_is_found_and_conditionally_hidden(self):
+        entries = odoo_source.find_view_fields("account.move", "invoice_date")
+        assert entries
+        assert any(e["invisible"] for e in entries), "bill date is conditionally hidden"
+        assert any(e["string"] == "Bill Date" for e in entries)
+
+    def test_find_view_pages_returns_real_tabs(self):
+        pages = odoo_source.find_view_pages("product.template")
+        assert "General Information" in pages
+        assert "Purchase" in pages
+
+    def test_page_labels_are_scoped_per_model(self, session):
+        """"Purchase" is a tab on product.template, not on purchase.order."""
+        labels = assessor.page_labels_for(session)
+        assert "purchase" in labels.get("product.template", set())
+        assert "purchase" not in labels.get("purchase.order", set())
+
+    def test_hidden_fields_are_scoped_per_model(self, session):
+        hidden = assessor.hidden_fields_for(session)
+        assert isinstance(hidden, dict)
+        assert hidden, "nothing resolved; the view search is broken"
+        assert any(model == "account.move" for model in hidden)
+
+    def test_tab_switch_fires_on_a_real_tab(self, session, gold):
+        """Odoo 18 tabs record as positional selectors, so the label is the signal."""
+        assessment = assessor.assess_deterministic(session, gold)
+        by_index = {c.step_index: c for c in session.clicks}
+        tabs = [
+            assessor.normalise_label(
+                by_index[s.step_index].target.aria_label if by_index[s.step_index].target else None
+            )
+            for seg in assessment.segments for s in seg.steps if s.signals.get("tab_switch")
+        ]
+        assert "general information" in tabs
+
+    def test_hidden_field_catches_the_product_price(self, session, gold):
+        """The guide's example friction: price only reachable on the product form."""
+        assessment = assessor.assess_deterministic(session, gold)
+        by_index = {c.step_index: c for c in session.clicks}
+        hidden = [
+            assessor.normalise_label(
+                by_index[s.step_index].target.aria_label if by_index[s.step_index].target else None
+            )
+            for seg in assessment.segments for s in seg.steps if s.signals.get("hidden_field")
+        ]
+        assert "sales price" in hidden

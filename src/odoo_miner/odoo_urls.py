@@ -19,25 +19,24 @@ user is looking at, so that is what ends up in the context.
 
 from __future__ import annotations
 
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from .models import OdooContext
 
 
-def _to_int(value: Optional[str]) -> Optional[int]:
+def _to_int(value: str | None) -> int | None:
     try:
         return int(value) if value is not None else None
     except ValueError:
         return None
 
 
-def _first(params: dict[str, list[str]], key: str) -> Optional[str]:
+def _first(params: dict[str, list[str]], key: str) -> str | None:
     values = params.get(key)
     return values[0] if values else None
 
 
-def parse_odoo_url(url: Optional[str]) -> OdooContext:
+def parse_odoo_url(url: str | None) -> OdooContext:
     if not url:
         return OdooContext()
 
@@ -63,7 +62,7 @@ def parse_odoo_url(url: Optional[str]) -> OdooContext:
         ctx.path_slugs = rest
 
         action = model = None
-        record: Optional[int] = None
+        record: int | None = None
         is_new = False
         for seg in rest:
             if seg.isdigit():

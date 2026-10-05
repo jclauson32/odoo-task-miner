@@ -10,7 +10,7 @@ inspected, or swapped on its own.
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +25,7 @@ class RecordRef(BaseModel):
     """An Odoo record a segment worked on."""
 
     model: str
-    record_id: Optional[int] = None
+    record_id: int | None = None
 
 
 class Segment(BaseModel):
@@ -35,7 +35,7 @@ class Segment(BaseModel):
     step_indexes: list[int]               # Click.step_index values, in order
     label: str                            # "Create RFQ for Apex Guidewire"
     intent: str                           # short verb phrase: "create purchase order"
-    record: Optional[RecordRef] = None
+    record: RecordRef | None = None
     outcome: Outcome = "completed"
 
 
@@ -61,8 +61,8 @@ class QueryRef(BaseModel):
 
     model: str
     method: str
-    domain: Optional[list] = None
-    fields: Optional[list[str]] = None
+    domain: list | None = None
+    fields: list[str] | None = None
 
 
 class TracedSegment(BaseModel):
@@ -72,6 +72,22 @@ class TracedSegment(BaseModel):
     kind: SegmentKind
     actions: list[CodeRef] = Field(default_factory=list)
     retrievals: list[QueryRef] = Field(default_factory=list)
+    explanation: str = ""
+
+
+class TracedSegmentDraft(BaseModel):
+    """What the tracer agent itself returns.
+
+    `retrievals` are left out on purpose. They come straight from the captured
+    calls, so asking the model for them would be asking it to retype data we
+    already have - and `QueryRef.domain` is an untyped list, which Anthropic's
+    strict structured-output schema rejects. The code fills them in to build
+    the full `TracedSegment`.
+    """
+
+    segment_id: str
+    kind: SegmentKind
+    actions: list[CodeRef] = Field(default_factory=list)
     explanation: str = ""
 
 
@@ -120,11 +136,14 @@ class Plan(BaseModel):
     target_segments: list[str] = Field(default_factory=list)
     summary: str
     changes: list[PlannedChange] = Field(default_factory=list)
-    module_name: Optional[str] = None
+    module_name: str | None = None
     expected_steps_before: int = 0
     expected_steps_after: int = 0
     acceptance_criteria: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
+    # Filled in by code after the model answers (planner.check_citations), so
+    # the approver sees which file references could not be confirmed.
+    unverified_citations: list[str] = Field(default_factory=list)
 
 
 class BuildResult(BaseModel):
@@ -133,6 +152,7 @@ class BuildResult(BaseModel):
     contract_version: str = CONTRACT_VERSION
     branch: str = ""
     commit: str = ""
+    pr_url: str = ""
     tests_passed: bool = False
     test_output_path: str = ""
     replay_completed: bool = False

@@ -15,9 +15,10 @@ import ast
 import json
 import re
 import subprocess
+import time
+from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Optional
 
 from ..config import settings
 from ..contracts import CodeRef
@@ -172,7 +173,7 @@ _BUTTON_RE = re.compile(r"<button\b[^>]*>", re.DOTALL)
 _ATTR_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
 
-def find_button(name: str, model: Optional[str] = None) -> list[CodeRef]:
+def find_button(name: str, model: str | None = None) -> list[CodeRef]:
     """Find view buttons whose `name` attribute is `name`.
 
     A button's `type` says what the name means: `object` is a Python method on
@@ -213,7 +214,7 @@ def find_button(name: str, model: Optional[str] = None) -> list[CodeRef]:
     return refs
 
 
-def read_source(file: str, start: int = 1, end: Optional[int] = None) -> str:
+def read_source(file: str, start: int = 1, end: int | None = None) -> str:
     """Read a bounded range of lines from Odoo's source or this project's addons.
 
     Args:
@@ -250,92 +251,141 @@ def _resolve_readable(file: str) -> Path:
     # "addons/purchase/..." may be relative to the Odoo root or to the project.
     candidates += [Path.cwd() / raw]
 
+    missing_inside = False
     for candidate in candidates:
         try:
             resolved = candidate.resolve()
         except OSError:
             continue
-        if not resolved.is_file():
+        if not any(resolved == root or root in resolved.parents for root in roots):
             continue
-        if any(resolved == root or root in resolved.parents for root in roots):
+        if resolved.is_file():
             return resolved
+        missing_inside = True
 
+    if missing_inside:
+        raise FileNotFoundError(
+            f"No such file: {file}. Paths are relative to the Odoo source root, e.g. "
+            "addons/purchase/models/purchase_order.py; find_method and find_button return exact paths."
+        )
     raise PermissionError(
-        f"{file} is not readable: it must be inside the Odoo source checkout or addons/."
+        f"{file} is outside the Odoo source checkout and addons/; refusing to read it."
     )
 
 
 _FIELD_RE = re.compile(r'<field\b[^>]*\bname="([^"]+)"[^>]*>?', re.DOTALL)
+_RECORD_SPLIT_RE = re.compile(r"(?=<record\b)")
+_PAGE_RE = re.compile(r'<page\b[^>]*\bstring="([^"]*)"')
 
 
-def find_view_fields(model: str, field: Optional[str] = None) -> list[dict]:
-    """Where a model's form view puts its fields, and what hides them.
+def find_view_fields(model: str, field: str | None = None) -> list[dict]:
+    """Where a model's views put its fields, and what hides them.
 
     Used to tell whether a field the user edited was behind a notebook page or
     conditionally invisible - both make a step harder than it looks.
+
+    A view declares its model as element text (`<field name="model">a.b</field>`),
+    not as an attribute, and one XML file usually holds views for several
+    models - so this matches on the element form and scopes each scan to the
+    `<record>` that declares the model asked for.
 
     Args:
         model: Odoo model name, e.g. "account.move".
         field: optional field name to restrict the answer to.
 
     Returns:
-        One dict per field occurrence: file, line, page (notebook page string
-        label, if any) and invisible (the modifier, if any).
+        One dict per field occurrence: field, string (its label, when the view
+        sets one), file, line, page (the notebook page's label, if any) and
+        invisible (the modifier, if any).
     """
     root = source_root()
-    stem = model.replace(".", "_")
+    declaration = f'name="model">{model}<'
     out: list[dict] = []
 
-    for path in _grep_files(f'"{model}"', root, include="*.xml"):
-        if stem not in path.name:
-            continue
+    for path in _grep_files(f">{model}<", root, include="*.xml"):
         text = _safe_read(path)
-        page: Optional[str] = None
-        for number, line in enumerate(text.splitlines(), start=1):
-            if "<page" in line:
-                label = re.search(r'string="([^"]*)"', line)
-                page = label.group(1) if label else page
-            if "</notebook>" in line:
-                page = None
-            match = _FIELD_RE.search(line)
-            if not match:
-                continue
-            name = match.group(1)
-            if field and name != field:
-                continue
-            invisible = re.search(r'invisible="([^"]*)"', line)
-            out.append({
-                "field": name,
-                "file": relative(path, root),
-                "line": number,
-                "page": page,
-                "invisible": invisible.group(1) if invisible else None,
-            })
+        if declaration not in text:
+            continue
+        offset = 0
+        for record in _RECORD_SPLIT_RE.split(text):
+            length = len(record)
+            if declaration in record:
+                out += _fields_in_record(record, path, root, offset, text, field)
+            offset += length
+    return out
+
+
+def _fields_in_record(
+    record: str, path: Path, root: Path, offset: int, whole: str, wanted: str | None
+) -> list[dict]:
+    """Fields inside one <record>, with the notebook page each one sits in."""
+    base_line = whole.count("\n", 0, offset) + 1
+    out: list[dict] = []
+    page: str | None = None
+
+    for number, line in enumerate(record.splitlines()):
+        if "<page" in line:
+            label = _PAGE_RE.search(line)
+            if label:
+                page = label.group(1)
+        if "</notebook>" in line:
+            page = None
+
+        match = _FIELD_RE.search(line)
+        if not match:
+            continue
+        name = match.group(1)
+        if name == "model" or (wanted and name != wanted):
+            continue
+        label = re.search(r'string="([^"]*)"', line)
+        invisible = re.search(r'invisible="([^"]*)"', line)
+        out.append({
+            "field": name,
+            "string": label.group(1) if label else None,
+            "file": relative(path, root),
+            "line": base_line + number,
+            "page": page,
+            "invisible": invisible.group(1) if invisible else None,
+        })
     return out
 
 
 # ---------------------------------------------------------------- installed modules
 
 
+# How long a fetched module list is trusted before asking Odoo again.
+INSTALLED_MODULES_TTL = 6 * 3600
+
+
+def _modules_cache() -> Path:
+    return Path("out") / ".cache" / f"installed_modules.{settings().odoo_db}.json"
+
+
 @lru_cache(maxsize=1)
 def installed_modules() -> frozenset[str]:
     """Modules installed in the demo database, via the same JSON-RPC Odoo exposes.
 
-    Cached for the process. Returns an empty set when Odoo is not reachable,
-    and callers then simply do not filter - a missing Odoo must not turn a
-    source search into an error.
+    Asked once per process and cached on disk for INSTALLED_MODULES_TTL, per
+    database. When Odoo is unreachable, an expired cache is still used - a
+    slightly old list filters better than none - and with no cache at all
+    the result is empty, so callers simply do not filter. A missing Odoo must
+    not turn a source search into an error.
     """
-    cache = Path("out") / "installed_modules.json"
+    cache = _modules_cache()
+    cached: frozenset[str] = frozenset()
     if cache.exists():
         try:
-            return frozenset(json.loads(cache.read_text(encoding="utf-8")))
+            cached = frozenset(json.loads(cache.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
-            pass
+            cached = frozenset()
+        if cached and time.time() - cache.stat().st_mtime < INSTALLED_MODULES_TTL:
+            return cached
 
     names = _fetch_installed_modules()
-    if names:
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(sorted(names), indent=2), encoding="utf-8")
+    if not names:
+        return cached
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(sorted(names), indent=2), encoding="utf-8")
     return frozenset(names)
 
 
@@ -375,6 +425,49 @@ def _fetch_installed_modules() -> set[str]:
     return {r["name"] for r in records if r.get("name")}
 
 
-# Functions handed to agents. create_agent accepts plain callables; the
-# docstrings above are the tool descriptions the model reads.
-TOOLS = [find_method, find_button, read_source, find_view_fields]
+def find_view_pages(model: str) -> list[str]:
+    """The notebook page labels a model's views define, e.g. "General Information".
+
+    A click on one of these is a tab switch. The Recorder records Odoo 18 tabs
+    as positional selectors (`div.o_content li:nth-of-type(1) > a`) with no
+    class to match on, so the label is the only reliable signal.
+
+    Args:
+        model: Odoo model name, e.g. "product.template".
+
+    Returns:
+        Page labels, de-duplicated.
+    """
+    root = source_root()
+    declaration = f'name="model">{model}<'
+    pages: set[str] = set()
+
+    for path in _grep_files(f">{model}<", root, include="*.xml"):
+        text = _safe_read(path)
+        if declaration not in text:
+            continue
+        for record in _RECORD_SPLIT_RE.split(text):
+            if declaration in record:
+                pages.update(_PAGE_RE.findall(record))
+    return sorted(pages)
+
+
+_ALL = (find_method, find_button, read_source, find_view_fields, find_view_pages)
+
+
+def agent_tools(*names: str) -> list:
+    """These functions as agent tools: errors come back as text instead of ending the run.
+
+    create_agent accepts plain callables; the docstrings above are the tool
+    descriptions the model reads. With no names, all of them.
+    """
+    from .errors import reports_errors
+
+    chosen = [fn for fn in _ALL if not names or fn.__name__ in names]
+    unknown = set(names) - {fn.__name__ for fn in chosen}
+    if unknown:
+        raise ValueError(f"Unknown tools: {sorted(unknown)}")
+    return [reports_errors(fn) for fn in chosen]
+
+
+TOOLS = agent_tools()

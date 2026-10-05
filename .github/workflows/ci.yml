@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # --locked fails if uv.lock is out of date with pyproject.toml.
+      - name: Install
+        run: uv sync --extra dev --locked
+
+      - name: Lint
+        run: uv run ruff check src tests evals scripts
+
+      # No API key, no Odoo, no Odoo source checkout here: tests that need the
+      # source skip, and conftest.py blocks email, pushes and tracing.
+      - name: Test
+        run: uv run pytest -q

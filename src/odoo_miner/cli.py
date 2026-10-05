@@ -14,7 +14,6 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import typer
 from pydantic import BaseModel, ValidationError
@@ -27,6 +26,14 @@ from .models import ClickLog, NetworkLog, Session
 from .recorder import RecordingError, load_recording
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="Parse Odoo workflow recordings for the analysis agents.")
+
+
+@app.callback()
+def _load_settings() -> None:
+    """Load .env before any command, so every run - traces included - sees it."""
+    from .agents.config import load_env
+
+    load_env()
 console = Console()
 err = Console(stderr=True)
 
@@ -64,10 +71,24 @@ def _do_ingest(recording: Path, out: Path, keep_noise: bool) -> ClickLog:
     return log
 
 
+def _keep_recording(recording: Path, out_dir: Path) -> None:
+    """Save the recording with the run, secrets redacted, and note where the original is.
+
+    The builder edits this copy into the after-recording; the replay restores
+    the redacted values from the original, so they never reach a model.
+    """
+    from .recorder import redact_recording
+
+    data = json.loads(recording.read_text(encoding="utf-8"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "recording.json").write_text(json.dumps(redact_recording(data), indent=2), encoding="utf-8")
+    (out_dir / "recording.source").write_text(str(recording.resolve()), encoding="utf-8")
+
+
 def _do_replay(
-    recording: Path, out: Path, script: Path, headless: bool, cookie: Optional[str],
-    pre_hook: Optional[str], timeout_ms: int, settle_ms: int, chrome: Optional[str],
-    screenshots: Optional[Path] = None,
+    recording: Path, out: Path, script: Path, headless: bool, cookie: str | None,
+    pre_hook: str | None, timeout_ms: int, settle_ms: int, chrome: str | None,
+    screenshots: Path | None = None,
 ) -> NetworkLog:
     if not script.exists():
         _fail(f"Replay script not found at {script}. Pass --script or set ODOO_MINER_REPLAY.")
@@ -118,7 +139,7 @@ def _do_replay(
     return log
 
 
-def _do_merge(clicks: ClickLog, network: Optional[NetworkLog], out: Path) -> Session:
+def _do_merge(clicks: ClickLog, network: NetworkLog | None, out: Path) -> Session:
     session = merge_logs(clicks, network)
     _write(session, out)
     writes = sum(1 for c in session.clicks if c.has_write)
@@ -147,14 +168,14 @@ def replay(
     out: Path = typer.Option(Path("network.json"), "--out", "-o"),
     script: Path = ReplayScript,
     headless: bool = typer.Option(True, help="Run Chrome without a window."),
-    cookie: Optional[str] = typer.Option(None, help="Session cookie to set before replay, e.g. 'session_id=abc123'."),
-    pre_hook: Optional[str] = typer.Option(
+    cookie: str | None = typer.Option(None, help="Session cookie to set before replay, e.g. 'session_id=abc123'."),
+    pre_hook: str | None = typer.Option(
         None, help="Shell command to run first, e.g. a database restore. Replay aborts if it fails."
     ),
     timeout_ms: int = typer.Option(10000, "--timeout", help="Per-step timeout in milliseconds."),
     settle_ms: int = typer.Option(500, "--settle", help="Network idle time to wait for after each step."),
-    chrome: Optional[str] = typer.Option(None, help="Path to a Chrome/Chromium executable."),
-    screenshots: Optional[Path] = typer.Option(None, help="Folder to save a screenshot after every step."),
+    chrome: str | None = typer.Option(None, help="Path to a Chrome/Chromium executable."),
+    screenshots: Path | None = typer.Option(None, help="Folder to save a screenshot after every step."),
 ):
     """Replay a recording with Puppeteer and capture Odoo backend calls per step.
 
@@ -167,7 +188,7 @@ def replay(
 @app.command()
 def merge(
     clicks: Path = typer.Argument(..., help="Output of `ingest`."),
-    network: Optional[Path] = typer.Argument(None, help="Output of `replay` (optional)."),
+    network: Path | None = typer.Argument(None, help="Output of `replay` (optional)."),
     out: Path = typer.Option(Path("session.json"), "--out", "-o"),
 ):
     """Attach captured backend calls to the steps that triggered them."""
@@ -183,16 +204,17 @@ def run(
     skip_replay: bool = typer.Option(False, help="Only ingest; no network capture."),
     script: Path = ReplayScript,
     headless: bool = typer.Option(True),
-    cookie: Optional[str] = typer.Option(None),
-    pre_hook: Optional[str] = typer.Option(None),
+    cookie: str | None = typer.Option(None),
+    pre_hook: str | None = typer.Option(None),
     timeout_ms: int = typer.Option(10000, "--timeout"),
     settle_ms: int = typer.Option(500, "--settle"),
-    chrome: Optional[str] = typer.Option(None),
+    chrome: str | None = typer.Option(None),
     screenshots: bool = typer.Option(False, help="Save a screenshot after every replay step into OUT_DIR/screenshots."),
     keep_noise: bool = typer.Option(False),
 ):
     """Ingest, replay and merge in one go. Writes clicks.json, network.json and session.json."""
     click_log = _do_ingest(recording, out_dir / "clicks.json", keep_noise)
+    _keep_recording(recording, out_dir)
     net_log = None
     if not skip_replay:
         net_log = _do_replay(
@@ -204,34 +226,58 @@ def run(
 
 
 @app.command()
-def show(path: Path = typer.Argument(..., help="clicks.json or session.json")):
-    """Print a click log or session as a table."""
+def show(
+    path: Path = typer.Argument(..., help="clicks.json or session.json"),
+    first: int | None = typer.Option(None, "--from", help="First step number to show."),
+    last: int | None = typer.Option(None, "--to", help="Last step number to show."),
+):
+    """Print any pipeline file as a table: clicks, session, segments, traces, assessment or plan."""
     data = json.loads(path.read_text(encoding="utf-8"))
+    for looks_like, render in _ARTIFACT_VIEWS:
+        if looks_like(data):
+            render(data, path)
+            return
     is_session = "unattributed_calls" in data
     log = Session.model_validate(data) if is_session else ClickLog.model_validate(data)
+    clicks = [
+        c for c in log.clicks
+        if (first is None or c.step_index >= first) and (last is None or c.step_index <= last)
+    ]
+
+    def screen(c) -> str:
+        parts = [c.page.model, str(c.page.record_id or "") or None, c.page.view_type]
+        return " ".join(filter(None, parts)) or "/".join(c.page.path_slugs)
+
+    # Odoo 18 rarely puts the screen in the URL; drop the column when it is empty.
+    show_screen = any(screen(c) for c in clicks)
 
     table = Table(title=log.title or str(path))
-    table.add_column("#", justify="right")
+    table.add_column("Step", justify="right")
     table.add_column("Type")
     table.add_column("Target")
     table.add_column("Value")
-    table.add_column("Screen")
+    if show_screen:
+        table.add_column("Screen")
     if is_session:
         table.add_column("Backend calls", overflow="fold")
 
-    for c in log.clicks:
+    for c in clicks:
         t = c.target
         target = (t.aria_label or t.text or t.button_name or t.css or "") if t else (c.url or "")
-        screen = " ".join(filter(None, [c.page.model, str(c.page.record_id or "") or None, c.page.view_type])) or (
-            "/".join(c.page.path_slugs)
-        )
-        row = [str(c.index), c.type, escape(target[:50]), escape((c.value or c.key or "")[:30]), escape(screen)]
+        row = [str(c.step_index), c.type, escape(target[:50]), escape((c.value or c.key or "")[:30])]
+        if show_screen:
+            row.append(escape(screen(c)))
         if is_session:
-            row.append("\n".join(f"{k.kind}: {k.method}" for k in c.calls))
+            calls = []
+            for k in c.calls:
+                name = f"{k.model}.{k.method}" if k.model else (k.method or k.endpoint)
+                calls.append(escape(f"{k.kind} {name}"))
+                if k.rpc_error:
+                    calls.append(f"[red]error: {escape(k.rpc_error.strip()[:80])}[/red]")
+            row.append("\n".join(calls))
         table.add_row(*row)
 
     console.print(table)
-
 
 
 # ---------------------------------------------------------------- analysis stages
@@ -274,7 +320,7 @@ def segment(
     log = run_segmenter_path(_session_arg(session), out, run=run_name)
     console.print(f"[green]✓[/green] {len(log.segments)} segments → {out}")
     for seg in log.segments:
-        console.print(f"  {seg.segment_id} [{seg.outcome}] {escape(seg.label)}")
+        console.print(f"  {seg.segment_id} {escape(f'[{seg.outcome}]')} {escape(seg.label)}")
 
 
 @app.command()
@@ -322,7 +368,7 @@ def assess(
 @app.command()
 def plan(
     run_dir: Path = typer.Argument(..., help="Run folder holding segments/traces/assessment."),
-    out: Optional[Path] = typer.Option(None, "--out", "-o"),
+    out: Path | None = typer.Option(None, "--out", "-o"),
     run_name: str = typer.Option("adhoc", "--run"),
 ):
     """Decide whether the workflow is worth changing, and plan the change."""
@@ -332,25 +378,68 @@ def plan(
     result = run_planner_path(run_dir, target, run=run_name)
     console.print(f"[green]✓[/green] decision: [bold]{result.decision}[/bold] → {target}")
     console.print(escape(result.summary))
+    _show_citation_check(result.unverified_citations)
+
+
+def _show_pending(payload: dict) -> None:
+    """Print what a pause is asking a person to approve."""
+    from .pipeline.graph import is_tool_gate
+
+    if is_tool_gate(payload):
+        console.print("\n[yellow]The builder wants to send something out. Approve each action:[/yellow]")
+        for request in payload["action_requests"]:
+            console.print(f"  [bold]{escape(request.get('name', '?'))}[/bold]")
+            for key, value in (request.get("args") or {}).items():
+                text = str(value)
+                console.print(f"    {key}: {escape(text[:300] + ('…' if len(text) > 300 else ''))}")
+        return
+
+    console.print("\n[yellow]Waiting for approval of the plan.[/yellow]")
+    for key in ("decision", "plan_summary", "module_name", "plan_md"):
+        if payload.get(key) is not None:
+            console.print(f"  {key}: {escape(str(payload[key]))}")
+    for key, label in (("acceptance_criteria", "acceptance criterion"), ("risks", "risk")):
+        for item in payload.get(key) or []:
+            console.print(f"  {label}: {escape(str(item))}")
+    _show_citation_check(payload.get("unverified_citations") or [])
+
+
+def _show_citation_check(problems: list[str]) -> None:
+    if problems:
+        console.print("  [yellow]Citations to check by hand before approving:[/yellow]")
+        for problem in problems:
+            console.print(f"    - {escape(problem)}")
+    else:
+        console.print("  [green]Every file and line the plan cites was found in the source.[/green]")
 
 
 @app.command()
 def analyze(
     run_dir: Path = typer.Argument(..., help="Run folder containing session.json."),
-    until: Optional[str] = typer.Option(
+    until: str | None = typer.Option(
         None, "--until", help="Stop after this stage: segment, trace, assess, plan, approve, build."
     ),
-    run_name: Optional[str] = typer.Option(None, "--run", help="Defaults to the run folder's name."),
-    thread: Optional[str] = typer.Option(None, "--thread", help="Resume a run by thread id."),
-    approve: Optional[bool] = typer.Option(
+    run_name: str | None = typer.Option(None, "--run", help="Defaults to the run folder's name."),
+    thread: str | None = typer.Option(None, "--thread", help="Resume a run by thread id."),
+    approve: bool | None = typer.Option(
         None, "--approve/--reject", help="Answer a pending approval and continue."
     ),
     notes: str = typer.Option("", "--notes", help="Notes to record with the approval."),
+    restart: bool = typer.Option(
+        False, "--restart", help="Start over instead of resuming an unfinished run on this thread."
+    ),
 ):
     """Run the stages as one LangGraph pipeline, resumable and traced as one tree."""
     from langgraph.types import Command
 
-    from .pipeline.graph import build_graph, sqlite_checkpointer
+    from .pipeline.graph import (
+        build_graph,
+        is_tool_gate,
+        record_tool_decision,
+        resume_value,
+        sqlite_checkpointer,
+        start_or_resume,
+    )
     from .pipeline.state import STAGES
 
     if until is not None and until not in STAGES:
@@ -360,10 +449,17 @@ def analyze(
     _session_arg(session)
     name = run_name or run_dir.name
     thread_id = thread or name
+    os.environ["ODOO_MINER_RUN"] = name       # audit entries carry the run
 
     with sqlite_checkpointer(run_dir / "pipeline.sqlite") as checkpointer:
         graph = build_graph(checkpointer=checkpointer, until=until)
-        config = {"configurable": {"thread_id": thread_id}}
+        # Named and tagged so the whole run is one findable tree in LangSmith.
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "run_name": f"odoo-miner analyze {name}",
+            "metadata": {"run": name},
+            "tags": ["odoo-miner", "pipeline"],
+        }
 
         if approve is None:
             state = {
@@ -371,26 +467,32 @@ def analyze(
                 "run_dir": str(run_dir),
                 "session_path": str(session),
             }
-            result = graph.invoke(state, config=config)
+            unfinished = graph.get_state(config).next
+            if unfinished and not restart:
+                console.print(f"Resuming {thread_id} at {', '.join(unfinished)} (pass --restart to start over).")
+            result = start_or_resume(graph, config, state, restart=restart)
         else:
+            waiting = graph.get_state(config).interrupts
+            if not waiting:
+                _fail(f"Nothing is waiting for approval on thread {thread_id!r}.")
+            payload = waiting[0].value
+            if is_tool_gate(payload):
+                record_tool_decision(payload, approve, notes, name)
             result = graph.invoke(
-                Command(resume={"approved": approve, "notes": notes}), config=config
+                Command(resume=resume_value(payload, approve, notes)), config=config
             )
 
     pending = result.get("__interrupt__")
     if pending:
         payload = pending[0].value if hasattr(pending[0], "value") else pending[0]
-        console.print("\n[yellow]Waiting for approval.[/yellow]")
-        for key in ("decision", "plan_summary", "module_name", "plan_md"):
-            if payload.get(key) is not None:
-                console.print(f"  {key}: {escape(str(payload[key]))}")
-        for key in ("acceptance_criteria", "risks"):
-            for item in payload.get(key) or []:
-                console.print(f"  {key[:-1]}: {escape(str(item))}")
+        _show_pending(payload)
+        # Answer with the same --until the run used, so approving a plan that
+        # proposes a module does not start a builder this run left out.
+        scope = f"--until {until} " if until else ""
         console.print(
-            f"\nApprove with:  odoo-miner analyze {run_dir} --approve "
-            f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} --reject "
-            f"--thread {thread_id}"
+            f"\nApprove with:  odoo-miner analyze {run_dir} {scope}--approve "
+            f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} {scope}--reject "
+            f"--thread {thread_id} --notes \"why\""
         )
         return
 
@@ -406,6 +508,161 @@ def analyze(
         console.print(f"  {label}: {path}")
     for problem in result.get("errors") or []:
         err.print(f"[yellow]{escape(problem)}[/yellow]")
+
+@app.command()
+def doctor():
+    """Check this machine is ready: keys, Odoo, databases, source, replay, email, GitHub."""
+    from .doctor import run_checks
+
+    marks = {"ok": "[green]✓[/green]", "warn": "[yellow]![/yellow]", "fail": "[red]✗[/red]"}
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column(width=1)
+    table.add_column(style="bold")
+    table.add_column(overflow="fold")
+    results = run_checks()
+    for check in results:
+        detail = escape(check.detail) + (f"\n[dim]→ {escape(check.fix)}[/dim]" if check.fix and check.status != "ok" else "")
+        table.add_row(marks[check.status], check.name, detail)
+    console.print(table)
+    failed = [check for check in results if check.status == "fail"]
+    if failed:
+        err.print(f"\n[red]{len(failed)} check(s) failed.[/red]")
+        raise typer.Exit(code=1)
+    console.print("\n[green]Ready.[/green]")
+
+
+@app.command()
+def report(
+    run_dir: Path = typer.Argument(..., help="Run folder with plan.json (and screenshots/, if replayed with --screenshots)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Send without asking for confirmation."),
+):
+    """Email the findings - the plan and screenshots of where the user got stuck - to REPORT_EMAIL_TO."""
+    import os
+
+    from .agents.config import settings
+    from .agents.reporting import compose_report
+    from .agents.tools.delivery import send_report_email
+
+    settings()
+    os.environ["ODOO_MINER_RUN"] = run_dir.name       # audit entries carry the run
+    try:
+        subject, body, attachments = compose_report(run_dir)
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    to = os.environ.get("REPORT_EMAIL_TO") or "(REPORT_EMAIL_TO not set)"
+    console.print(f"[bold]To:[/bold] {escape(to)}\n[bold]Subject:[/bold] {escape(subject)}")
+    for path in attachments:
+        console.print(f"  [dim]attach[/dim] {escape(path)}")
+    if not yes and not typer.confirm("Send it?", default=False):
+        console.print("Not sent.")
+        raise typer.Exit(code=1)
+    result = send_report_email(subject, body, attachments)
+    if result.startswith("sent"):
+        console.print(f"[green]✓[/green] {escape(result)}")
+    else:
+        _fail(result)
+
+
+# ---------------------------------------------------------------- show: agent artifacts
+
+
+def _show_segments(data: dict, path: Path) -> None:
+    table = Table(title=f"Segments - {data.get('session') or path}")
+    for column, justify in [("Segment", "left"), ("Steps", "right"), ("Outcome", "left"), ("What the user did", "left")]:
+        table.add_column(column, justify=justify)
+    for seg in data["segments"]:
+        steps = seg["step_indexes"]
+        outcome = seg.get("outcome", "completed")
+        color = {"failed": "red", "recovered": "yellow", "abandoned": "red"}.get(outcome, "green")
+        span = f"{steps[0]}-{steps[-1]}" if steps else "-"
+        table.add_row(seg["segment_id"], span, f"[{color}]{outcome}[/{color}]", escape(seg["label"]))
+    console.print(table)
+
+
+def _show_traces(data: dict, path: Path) -> None:
+    for seg in data["segments"]:
+        console.print(f"[bold]{seg['segment_id']}[/bold] [dim]{seg['kind']}[/dim]")
+        for ref in seg.get("actions", []):
+            console.print(f"  [cyan]{escape(ref['symbol'])}[/cyan]  {escape(ref['file'])}:{ref['line']}")
+        if seg.get("explanation"):
+            console.print(f"  {escape(seg['explanation'])}", soft_wrap=True)
+        console.print()
+
+
+def _show_assessment(data: dict, path: Path) -> None:
+    table = Table(title=f"Effort by segment - total {data.get('total_effort', 0):g}")
+    table.add_column("Segment")
+    table.add_column("Effort", justify="right")
+    table.add_column("Hardest step", justify="right")
+    table.add_column("Friction")
+    for seg in data["segments"]:
+        hardest = max(seg.get("steps", []), key=lambda s: s["score"], default=None)
+        table.add_row(
+            seg["segment_id"], f"{seg['effort']:g}",
+            f"{hardest['step_index']} ({hardest['score']})" if hardest else "-",
+            escape("; ".join(seg.get("friction", []))),
+        )
+    console.print(table)
+
+
+def _show_plan(data: dict, path: Path) -> None:
+    console.print(f"[bold]Decision:[/bold] {escape(data['decision'].replace('_', ' '))}")
+    if data.get("module_name"):
+        console.print(f"[bold]Module:[/bold] {escape(data['module_name'])}")
+    console.print(f"\n{escape(data['summary'])}\n", soft_wrap=True)
+    for key, title in [("acceptance_criteria", "Acceptance criteria"), ("risks", "Risks")]:
+        if data.get(key):
+            console.print(f"[bold]{title}[/bold]")
+            for item in data[key]:
+                console.print(f"  - {escape(item)}", soft_wrap=True)
+    _show_citation_check(data.get("unverified_citations") or [])
+
+
+def _is_segments(data: dict) -> bool:
+    first = (data.get("segments") or [{}])[0]
+    return "step_indexes" in first
+
+
+def _is_traces(data: dict) -> bool:
+    first = (data.get("segments") or [{}])[0]
+    return "kind" in first and "actions" in first
+
+
+_ARTIFACT_VIEWS = [
+    (lambda d: "decision" in d and "summary" in d, _show_plan),
+    (lambda d: "total_effort" in d, _show_assessment),
+    (_is_traces, _show_traces),
+    (_is_segments, _show_segments),
+]
+
+
+@app.command()
+def audit(
+    run_name: str | None = typer.Option(None, "--run", help="Only this run's entries."),
+    last: int = typer.Option(20, "--last", help="How many of the most recent entries to show."),
+):
+    """Show the audit log: who approved or rejected what, and what was sent out."""
+    from .agents.audit import audit_path, read
+
+    entries = [e for e in read() if run_name is None or e.get("run") == run_name][-last:]
+    if not entries:
+        console.print(f"No audit entries{f' for run {run_name!r}' if run_name else ''} in {audit_path()}.")
+        return
+    table = Table(title=f"Audit log - {audit_path()}")
+    for column in ("When (UTC)", "Run", "Action", "Outcome", "Detail"):
+        table.add_column(column, overflow="fold")
+    colors = {"approved": "green", "ok": "green", "rejected": "yellow", "refused": "red"}
+    for entry in entries:
+        outcome = entry.get("outcome", "")
+        color = colors.get(outcome, "white")
+        detail = entry.get("notes") or entry.get("result") or entry.get("decision") or ""
+        table.add_row(
+            entry.get("at", "")[:19].replace("T", " "), entry.get("run", ""),
+            entry.get("action", "").replace("approve_", "approve "),
+            f"[{color}]{escape(outcome)}[/{color}]", escape(str(detail)[:120]),
+        )
+    console.print(table)
+
 
 if __name__ == "__main__":
     app()

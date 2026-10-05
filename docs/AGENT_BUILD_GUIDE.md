@@ -36,10 +36,13 @@ one user step with:
 | `calls` | backend calls this step triggered: `kind` (`read`/`write`/`compute`/`action_load`/`unknown`), `model`, `method`, `args`, `kwargs`, `rpc_error` |
 | `has_write` | any call of kind `write` |
 
-Reference recording: `tests/fixtures/rfq_to_payment.json` (create RFQ → add
-freight line → confirm → set product cost → create bill → hit "bill date
-required" error → fix → post → pay). Its session is the main test input for
-every agent below. Generate it with:
+Reference recording: `tests/fixtures/rfq_to_payment.json` (create an RFQ for
+Apex Guidewire Supply with two product lines → open each product and set its
+price → confirm the order → receive and validate → create the bill → hit the
+"bill date required" error → set the date → post → pay). Its session is
+committed as `tests/fixtures/rfq_to_payment.session.json` and is the main test
+input for every agent below; the gold segments in `evals/datasets/` are
+labelled against it. Regenerate it with:
 
 ```bash
 odoo-miner run tests/fixtures/rfq_to_payment.json -d out/rfq_to_payment \
@@ -102,7 +105,7 @@ src/odoo_miner/
     tools/
       odoo_source.py   # find_method, find_button, read_source, find_view_fields
       odoo_ops.py      # run_module_tests, install_module, replay_workflow
-      delivery.py      # git_push_feature_branch, send_report_email
+      delivery.py      # git_push_feature_branch, open_pull_request, send_report_email
     prompts/
       segmenter.md  tracer.md  assessor.md  planner.md  builder.md
   pipeline/
@@ -217,6 +220,7 @@ class Plan(BaseModel):
     expected_steps_after: int
     acceptance_criteria: list[str]     # testable statements
     risks: list[str]
+    unverified_citations: list[str]    # filled by code, not the model: see check_citations
 
 class BuildResult(BaseModel):
     branch: str; commit: str
@@ -493,6 +497,15 @@ The CLI shows the plan and resumes with
 `graph.invoke(Command(resume={"approved": True, "notes": ""}), config)`.
 A run paused at approval shows `result["__interrupt__"]`.
 
+After the model answers, `planner.check_citations` checks every `addons/...`
+reference in the plan and `plan.md` mechanically - the file exists, a cited line
+is in range, and the backticked identifier written just before a path occurs in
+that file - and stores what it could not confirm in `unverified_citations`,
+which the approval gate shows. On the reference run the planner cited five
+places; four were exact and one named the right view in the wrong file
+(`product_template_tree_view` lives in `product_template_views.xml`), which
+the check flags.
+
 **Done when:** the planner produces a valid `Plan` citing real files, `plan.md`
 reads well to a non-developer, and the graph pauses for approval.
 
@@ -540,34 +553,37 @@ Backend scoped to the new module only:
 
 ```python
 builder = create_deep_agent(
-    model=config.MODEL,
-    tools=[read_source, run_module_tests, install_module, replay_workflow,
-           measure_effort, git_push_feature_branch, send_report_email],
+    model=chat_model("builder"),          # 120 s request timeout, bounded retries
+    tools=[read_source, *bound_tools(run_dir, module_dir, plan.module_name)],
     system_prompt=load_prompt("builder"),
     backend=CompositeBackend(
         default=StateBackend(),
         routes={
-            f"/addons/{plan.module_name}/": FilesystemBackend(root_dir=f"addons/{plan.module_name}", virtual_mode=True),
+            f"/addons/{plan.module_name}/": FilesystemBackend(root_dir=module_dir, virtual_mode=True),
             "/run/": FilesystemBackend(root_dir=run_dir, virtual_mode=True),
         },
     ),
-    interrupt_on={"git_push_feature_branch": True, "send_report_email": True},
+    interrupt_on={name: True for name in GATED_TOOLS},   # push, pull request, email
     response_format=BuildResult,
     name="builder_agent",
 )
 ```
 
-Custom tools (`tools/odoo_ops.py`, `tools/delivery.py`), all thin wrappers over
-commands that already work by hand:
+The agent works in virtual paths (`/run/plan.md`, `/addons/<module>/...`).
+`bound_tools` wraps the Odoo and delivery tools for this run: it translates
+those paths to real ones (refusing any that escape), and the push, pull request
+and email tools act only on the module in the approved plan. The plain
+functions they wrap live in `tools/odoo_ops.py` and `tools/delivery.py`:
 
-| Tool | Wraps |
+| Tool the agent sees | Does |
 |---|---|
-| `install_module(name)` | `docker compose run --rm odoo odoo -d demo -i <name> --stop-after-init`, then restart Odoo |
-| `run_module_tests(name)` | `docker compose run --rm odoo odoo -d demo -i <name> --test-tags /<name> --stop-after-init`; save output to `/run/tests.log` |
-| `replay_workflow(recording_path)` | `odoo-miner run <recording> -d <run>/after --pre-hook ./scripts/restore_db.sh --screenshots` (restore first, then install the module, then replay) |
-| `measure_effort(run_dir)` | runs segment → trace → assess on the after-run and returns total effort |
-| `git_push_feature_branch(title)` | creates `feat/<module>`, commits `addons/<module>`, pushes to the configured remote |
-| `send_report_email(to, subject, body, attachments)` | SMTP via env settings; attaches screenshots and `plan.md` |
+| `install_module()` | `docker compose run --rm odoo odoo -d demo -i <module> --stop-after-init`, then restarts Odoo |
+| `run_module_tests()` | the same with `--test-tags /<module>`; the full log goes to `/run/tests.log`, never into the module |
+| `replay_workflow(recording, output)` | restore the database, install the module, `odoo-miner run <recording> -d <output> --screenshots` |
+| `measure_effort(output)` | segment and score the after-run; returns total effort |
+| `git_push_feature_branch(module_name, title)` | commits `addons/<module>` on `feat/<module>` in a temporary worktree and pushes; never the base branch, never your checkout |
+| `open_pull_request(module_name, title, body)` | opens (or finds the already-open) pull request with `gh` |
+| `send_report_email(subject, body, attachments)` | SMTP over TLS to `REPORT_EMAIL_TO` only; attaches `/run/plan.md` and screenshots |
 
 The "after" recording: the builder writes a new Recorder-format JSON for the
 improved workflow (it can copy steps from the original and remove the ones the
@@ -579,8 +595,11 @@ Module checklist the prompt should enforce: `__manifest__.py` with correct
 `depends`, inherited views by XML ID, `tests/` with at least one
 `TransactionCase` (and an `HttpCase` tour if UI changed), no core edits.
 
-`interrupt_on` pauses before push and email even after the plan was approved:
-two human checkpoints, one before building, one before anything leaves the machine.
+`interrupt_on` pauses before each push, pull request and email even after the
+plan was approved: a person approves the plan before anything is built, and
+each action before anything leaves the machine. `odoo-miner analyze --approve`
+answers whichever pause is pending, in the shape it expects, and records the
+answer in `out/audit.jsonl`. A test fails if an outward tool is not gated.
 
 **Done when:** on the reference run, the module installs, tests pass, the after
 replay completes, effort drops, branch `feat/<module>` exists, and the email

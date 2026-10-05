@@ -9,6 +9,13 @@ cd "$(dirname "$0")/.."
 DB="${DB:-demo}"
 SNAP="${SNAP:-${DB}_snapshot}"
 
+# Odoo is stopped while the database is swapped; if anything below fails,
+# start it again rather than leave the demo down.
+trap 'docker compose start odoo >/dev/null 2>&1 || true' ERR
+
+# Works straight after a Docker restart, when the database container is down.
+docker compose up -d --wait db
+
 if ! docker compose exec -T db psql -U odoo -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$SNAP'" | grep -q 1; then
   echo "No snapshot '$SNAP'. Run ./scripts/snapshot_db.sh first." >&2
   exit 1

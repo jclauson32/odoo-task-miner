@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -21,15 +20,32 @@ DEFAULT_FAST_MODEL = "anthropic:claude-haiku-4-5"
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
+# Per-request timeout. Measured over 278 calls in the live runs: median 2.4 s,
+# 95th percentile 13 s, slowest 59 s (the planner). Without a timeout the SDK
+# waits 10 minutes per attempt, so one stalled connection froze a run for
+# over five minutes before it was noticed. Two retries bound the worst case.
+REQUEST_TIMEOUT_S = 120
+MAX_RETRIES = 2
 
-def _load_dotenv_once() -> None:
-    """Load .env from the project root, if python-dotenv is available."""
+
+@lru_cache(maxsize=1)
+def load_env() -> None:
+    """Load .env from the project root into the environment, once per process.
+
+    Called at CLI start-up, before any command runs: LangChain decides whether
+    to trace a run when the run starts, so loading .env later - say, when the
+    first stage builds its model - leaves the pipeline untraced in a fresh
+    terminal. Variables already set in the environment win over the file.
+    """
     try:
         from dotenv import load_dotenv
     except ImportError:          # the library is optional for deterministic use
         return
     root = Path(__file__).resolve().parents[3]
     load_dotenv(root / ".env", override=False)
+
+
+_load_dotenv_once = load_env
 
 
 class Settings(BaseModel):
@@ -99,6 +115,17 @@ def trace_config(run: str, stage: str, **extra) -> dict:
         "metadata": {"run": run, "stage": stage, **extra},
         "tags": ["odoo-miner", stage],
     }
+
+
+def chat_model(stage: str):
+    """The chat model for a stage, with a request timeout and bounded retries.
+
+    Every agent builds its model here rather than passing a model string, so
+    no stage can hang on a stalled connection.
+    """
+    from langchain.chat_models import init_chat_model
+
+    return init_chat_model(model_for(stage), timeout=REQUEST_TIMEOUT_S, max_retries=MAX_RETRIES)
 
 
 def model_for(stage: str) -> str:

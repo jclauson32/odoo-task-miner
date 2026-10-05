@@ -159,8 +159,8 @@ def test_cli_ingest_merge_show(tmp_path):
     assert r.exit_code == 0, r.output
     assert Session.model_validate_json(session.read_text()).clicks[-1].has_write
 
-    r = runner.invoke(app, ["show", str(session)])
-    assert r.exit_code == 0 and "action_post" in r.output
+    r = runner.invoke(app, ["show", str(session)], env={"COLUMNS": "200"})
+    assert r.exit_code == 0 and "account.move.action_post" in r.output
 
 
 def test_cli_run_skip_replay(tmp_path):
@@ -183,7 +183,9 @@ def test_cli_replay_missing_script(tmp_path):
 
 # --- Real Odoo 18 recording ------------------------------------------------
 
-REAL = FIXTURES / "rfq_to_payment.json"
+# Exercises the new-tab start and Odoo 18 selectors; rfq_to_payment.json is the
+# reference workflow the agents and gold labels use.
+REAL = FIXTURES / "rfq_expedite_freight.json"
 
 
 def test_real_recording_skips_new_tab_and_keeps_indexes():
@@ -210,8 +212,108 @@ def test_aria_label_walks_out_of_icon_chains():
     assert by_step[30].target.aria_label == "Products"           # 'Products[role="menuitem"]'
 
 
+def test_show_numbers_rows_by_recording_step_and_filters_a_range(tmp_path):
+    out = tmp_path / "clicks.json"
+    runner.invoke(app, ["ingest", str(REAL), "-o", str(out)])
+    r = runner.invoke(app, ["show", str(out), "--from", "27", "--to", "27"], env={"COLUMNS": "200"})
+    assert r.exit_code == 0
+    assert "Confirm Order" in r.output            # step 27 by recording number
+    assert "Save manually" not in r.output        # step 14 is outside the range
+
+
 def test_show_does_not_eat_brackets(tmp_path):
     out = tmp_path / "clicks.json"
     runner.invoke(app, ["ingest", str(REAL), "-o", str(out)])
     r = runner.invoke(app, ["show", str(out)], env={"COLUMNS": "200"})
     assert "[FRT-EXP] Expedite freight" in r.output
+
+
+# --- show: agent artifacts ---------------------------------------------------
+
+GOLD_SEGMENTS = Path(__file__).resolve().parents[1] / "evals" / "datasets" / "rfq_to_payment.segments.json"
+
+
+def _show(path, columns="200"):
+    return runner.invoke(app, ["show", str(path)], env={"COLUMNS": columns})
+
+
+def test_show_renders_segments():
+    r = _show(GOLD_SEGMENTS)
+    assert r.exit_code == 0, r.output
+    assert "Confirm the bill and hit the missing bill date error" in r.output
+    assert "failed" in r.output and "recovered" in r.output
+
+
+def test_show_renders_traces(tmp_path):
+    traces = tmp_path / "traces.json"
+    traces.write_text(json.dumps({"session": "s", "segments": [{
+        "segment_id": "s07", "kind": "action", "retrievals": [],
+        "actions": [{"module": "purchase", "file": "addons/purchase/models/purchase_order.py",
+                     "line": 538, "symbol": "PurchaseOrder.button_confirm"}],
+        "explanation": "Confirming the RFQ turns it into a purchase order.",
+    }]}))
+    r = _show(traces)
+    assert r.exit_code == 0, r.output
+    assert "PurchaseOrder.button_confirm" in r.output and "purchase_order.py:538" in r.output
+
+
+def test_show_renders_assessment_and_plan(tmp_path):
+    assessment = tmp_path / "assessment.json"
+    assessment.write_text(json.dumps({"session": "s", "total_effort": 5, "segments": [{
+        "segment_id": "s10", "effort": 5, "friction": ["error: bill date required"],
+        "steps": [{"step_index": 50, "score": 4, "signals": {"error": 1.0}}],
+    }]}))
+    r = _show(assessment)
+    assert r.exit_code == 0 and "bill date required" in r.output and "50 (4)" in r.output
+
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({
+        "decision": "no_change", "summary": "The bill date is a deliberate control.",
+        "risks": ["Defaulting it would weaken an audit control."],
+        "unverified_citations": ["`x` is cited in a.py but does not appear there."],
+    }))
+    r = _show(plan)
+    assert r.exit_code == 0
+    assert "no change" in r.output and "deliberate control" in r.output
+    assert "check by hand" in r.output
+
+
+# --- secrets ---------------------------------------------------------------------
+
+
+def test_passwords_typed_in_a_recording_are_redacted_at_ingest():
+    """session.json is sent to the model and stored in traces; a password must not be."""
+    log = load_recording(FIXTURES / "rfq_to_payment.json")
+    by_step = {c.step_index: c for c in log.clicks}
+    assert by_step[5].value == "<redacted>"          # the password field
+    assert by_step[2].value == "admin"               # the login name is kept
+
+
+@pytest.mark.parametrize("selectors", [
+    [["input[type='password']"]], [["#pwd"]], [["aria/API key"]], [["[name='otp']"]],
+])
+def test_secret_fields_are_recognised(selectors):
+    from odoo_miner.recorder import parse_recording
+
+    log = parse_recording({"steps": [{"type": "change", "value": "hunter2", "selectors": selectors}]})
+    assert log.clicks[0].value == "<redacted>"
+
+
+def test_ordinary_fields_are_not_redacted():
+    from odoo_miner.recorder import parse_recording
+
+    log = parse_recording({"steps": [{"type": "change", "value": "12.50", "selectors": [["aria/Sales Price"]]}]})
+    assert log.clicks[0].value == "12.50"
+
+
+def test_smart_buttons_that_open_records_are_navigation_not_writes():
+    from odoo_miner.merge import classify
+    from odoo_miner.models import NetworkCall
+
+    def call(method, endpoint="/web/dataset/call_button/purchase.order/" + "x"):
+        return NetworkCall(step_index=1, timestamp_ms=0, endpoint=endpoint, model="purchase.order", method=method)
+
+    assert classify(call("action_view_picking")) == "action_load"
+    assert classify(call("action_view_source_purchase_orders")) == "action_load"
+    assert classify(call("action_post")) == "write"            # a real write through the same endpoint
+    assert classify(call("button_confirm")) == "write"

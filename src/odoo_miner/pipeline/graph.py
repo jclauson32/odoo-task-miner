@@ -7,12 +7,15 @@ approval gate between planning and building. Each node calls the same
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from itertools import pairwise
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from ..agents import audit
 from ..agents.assessor import run_assessor_path
 from ..agents.contracts import Plan
 from ..agents.planner import run_planner_path
@@ -55,8 +58,8 @@ def assess_node(state: PipelineState) -> dict:
 
 def plan_node(state: PipelineState) -> dict:
     out = _run_dir(state) / "plan.json"
-    run_planner_path(_run_dir(state), out, run=state.get("run", "adhoc"))
-    return {"plan_path": str(out)}
+    plan = run_planner_path(_run_dir(state), out, run=state.get("run", "adhoc"))
+    return {"plan_path": str(out), "decision": plan.decision}
 
 
 def approve_node(state: PipelineState) -> dict:
@@ -72,11 +75,18 @@ def approve_node(state: PipelineState) -> dict:
         "expected_steps_after": plan.expected_steps_after,
         "acceptance_criteria": plan.acceptance_criteria,
         "risks": plan.risks,
+        "unverified_citations": plan.unverified_citations,
         "plan_md": str(_run_dir(state) / "plan.md"),
     })
     if isinstance(decision, bool):           # tolerate a bare yes/no
         decision = {"approved": decision, "notes": ""}
-    return {"approval": dict(decision or {"approved": False, "notes": "no decision"})}
+    decision = dict(decision or {"approved": False, "notes": "no decision"})
+    audit.record(
+        "approve_plan", "approved" if decision.get("approved") else "rejected",
+        run=state.get("run"), plan=state["plan_path"], decision=plan.decision,
+        module=plan.module_name, notes=decision.get("notes") or None,
+    )
+    return {"approval": decision}
 
 
 def build_node(state: PipelineState) -> dict:
@@ -99,11 +109,44 @@ NODES = {
 }
 
 
+def is_tool_gate(payload: Any) -> bool:
+    """True when a pause is the builder asking to run a gated tool.
+
+    The pipeline pauses for two different reasons, and each expects a
+    differently shaped answer: the plan gate (approve_node) takes
+    `{"approved", "notes"}`, while the builder's tool gates (push, pull
+    request, email) take `{"decisions": [...]}`, one per requested action.
+    """
+    return isinstance(payload, dict) and "action_requests" in payload
+
+
+def resume_value(payload: Any, approved: bool, notes: str = "") -> dict:
+    """The answer to send back for a pause, in the shape that pause expects."""
+    if is_tool_gate(payload):
+        if approved:
+            decision: dict = {"type": "approve"}
+        else:
+            decision = {"type": "reject", "message": notes or "Rejected by the reviewer."}
+        return {"decisions": [decision for _ in payload["action_requests"]]}
+    return {"approved": approved, "notes": notes}
+
+
+def record_tool_decision(payload: Any, approved: bool, notes: str, run: str | None) -> None:
+    """Audit each gated tool call a person approved or rejected."""
+    for request in payload.get("action_requests", []):
+        audit.record(
+            f"approve_{request.get('name', 'tool')}", "approved" if approved else "rejected",
+            run=run, args=request.get("args"), notes=notes or None,
+        )
+
+
 def _approved(state: PipelineState) -> str:
-    return "build" if (state.get("approval") or {}).get("approved") else END
+    """Build only an approved plan that asks for a module; anything else ends here."""
+    approved = (state.get("approval") or {}).get("approved")
+    return "build" if approved and state.get("decision") == "customize" else END
 
 
-def build_graph(checkpointer: Any = None, until: Optional[str] = None):
+def build_graph(checkpointer: Any = None, until: str | None = None):
     """Compile the pipeline.
 
     Args:
@@ -125,7 +168,7 @@ def build_graph(checkpointer: Any = None, until: Optional[str] = None):
         graph.add_node(name, NODES[name])
 
     graph.add_edge(START, stages[0])
-    for current, following in zip(stages, stages[1:]):
+    for current, following in pairwise(stages):
         if current == "approve":
             graph.add_conditional_edges("approve", _approved, {"build": "build", END: END})
         else:
@@ -140,13 +183,60 @@ def build_graph(checkpointer: Any = None, until: Optional[str] = None):
     return graph.compile(checkpointer=checkpointer)
 
 
+def start_or_resume(graph: Any, config: dict, initial_state: dict, restart: bool = False) -> dict:
+    """Run the pipeline on a thread, continuing an unfinished run instead of redoing it.
+
+    LangGraph resumes from the last finished node only when invoked with no
+    input; invoking with the initial state starts over and pays for every
+    stage again. A run paused for approval is left alone - answering it is
+    `--approve` / `--reject`.
+    """
+    snapshot = graph.get_state(config)
+    if snapshot.interrupts:
+        return {"__interrupt__": list(snapshot.interrupts)}
+    if snapshot.next and not restart:
+        return graph.invoke(None, config=config)
+    return graph.invoke(initial_state, config=config)
+
+
+def checkpoint_types() -> list[tuple[str, str]]:
+    """Every contract model, registered so checkpoints can restore it.
+
+    Agents run inside pipeline nodes inherit the checkpointer, so their
+    structured responses (SegmentLog, TracedSegmentDraft, Plan, ...) are
+    saved in it. LangGraph restores only registered types - unregistered ones
+    warn today and are slated to be refused - and a refused type would break
+    resuming a run. Derived from the module so a new contract cannot be missed.
+    """
+    from pydantic import BaseModel
+
+    from ..agents import contracts
+
+    return sorted(
+        (value.__module__, value.__name__)
+        for value in vars(contracts).values()
+        if isinstance(value, type) and issubclass(value, BaseModel)
+        and value.__module__ == contracts.__name__
+    )
+
+
+@contextmanager
 def sqlite_checkpointer(path: str | Path):
-    """A SqliteSaver context manager, so runs resume across processes."""
+    """A SqliteSaver for one run folder, so runs resume across processes."""
+    import sqlite3
+
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
     from langgraph.checkpoint.sqlite import SqliteSaver
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    return SqliteSaver.from_conn_string(str(path))
+    connection = sqlite3.connect(str(path), check_same_thread=False)
+    try:
+        yield SqliteSaver(
+            connection, serde=JsonPlusSerializer(allowed_msgpack_modules=checkpoint_types())
+        )
+    finally:
+        connection.close()
 
 
 # Module-level graph for `langgraph dev` / LangGraph Studio, which supplies

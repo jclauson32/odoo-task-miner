@@ -1,31 +1,157 @@
 # odoo-miner
 
-Turns a Chrome DevTools Recorder session of someone working in Odoo into
-structured data the analysis agents can reason about: every step, the element
-it touched, the screen and record it happened on, and the exact backend calls
-it triggered.
+[![CI](https://github.com/jclauson32/odoo-task-miner/actions/workflows/ci.yml/badge.svg)](https://github.com/jclauson32/odoo-task-miner/actions/workflows/ci.yml)
 
-Building the analysis agents on top of this? Start with `AGENTS.md`, then
-`docs/AGENT_BUILD_GUIDE.md`.
+Records how a person actually works in Odoo, replays it to capture the backend
+call behind every click, and runs a pipeline of agents over the result: group
+the clicks into tasks, explain each task against the Odoo source code that ran,
+score where the friction is, and decide - with a person approving - whether the
+workflow is worth changing.
+
+The agents follow one rule throughout: **compute what can be computed, and let
+the model judge only what cannot.** Replay, call classification, difficulty
+signals and citation checks are code; naming tasks, explaining code and
+weighing a change are the model's job. Every model output is validated, and
+nothing leaves the machine without a person approving it.
+
+New here? [`docs/RUNBOOK.md`](docs/RUNBOOK.md) walks through the reference
+scenario end to end. Working on the agents? Start with [`AGENTS.md`](AGENTS.md),
+then [`docs/AGENT_BUILD_GUIDE.md`](docs/AGENT_BUILD_GUIDE.md).
+
+## What it found on the reference recording
+
+`tests/fixtures/rfq_to_payment.json` is a buyer creating an RFQ for two
+catheter components, fixing two product prices, confirming, receiving, billing
+and paying - and hitting Odoo's "bill date required" error on the way.
+
+| Stage | Built with | Result | Cost |
+|---|---|---|---|
+| replay | Puppeteer | 54 steps, 57 backend calls in about 50 s; a rerun reproduced every `(kind, model, method)` on every step | none |
+| segment | LangChain `create_agent` | 11-12 tasks in business language; boundary F1 0.78 and 0.75 against hand labels in two runs; found the failed confirm and the recovery | ~$0.09 |
+| trace | resolver in code + agent | every code reference exists (27/27, 23/23); confirm → `purchase_order.py:538`, post → `account_move.py:5558`, override chains included | ~$0.25 |
+| assess | 9 signals in code + agent | total effort 95; identical scores across runs; the bill error and its dialog flagged; model moves a score at most ±1 | ~$0.08 |
+| plan | Deep Agent | **No code change**, in two runs. The bill-date error is a deliberate audit control the obvious fix would weaken; the price detour is a training gap (run 1: the field is inline-editable in Purchase › Products) or bad catalog data (run 2: fix the two prices ahead of time). Run 1 cited 5 places, 4 exact and 1 flagged by the citation check; run 2's citations all checked out | $0.31-$6.65 |
+
+Costs are measured on Claude Sonnet 5 with LangSmith; the tracer figure is
+with prompt caching (82% of its input served from cache). The planner decides
+how much of Odoo's source to read, so its cost varies most: 11 model calls in
+one run, 69 in another. A whole analysis has cost between $0.66 and about $7.
+
+## When a change is worth building
+
+`recordings/bill-exception-review.json` is a buyer resolving two seeded
+three-way-match exceptions: a bill priced above its purchase order (4.35
+against 4.10) and a bill for 1,000 units when 600 were received. For each,
+they open the purchase order and its receipts just to read numbers, come
+back, correct the line and post.
+
+The planner chose to **customize** - nothing in Odoo Community shows the PO's
+quantity, received quantity or price on a bill line (the "Purchase Matching"
+button hides once a line is matched; 3-way matching is an Enterprise
+upgrade) - and the builder delivered `purchase_bill_match_columns`, three
+read-only columns on the bill lines:
+
+| Check | Result |
+|---|---|
+| Module tests (Odoo's own result line) | 3 of 3 pass |
+| Workflow replayed with the module installed | both bills posted with the same corrected values |
+| Steps / effort, scored the same way before and after | 20 → 14 steps, 34 → 22 effort (**−35%**) |
+| Review | the first push was rejected (the columns leaked onto customer invoices); the builder fixed it, reran its tests, and asked again |
+| Delivery | branch `feat/purchase_bill_match_columns`, [pull request #1](https://github.com/jclauson32/odoo-task-miner/pull/1), report email with before/after screenshots - each approved by a person, each in `out/audit.jsonl` |
+
+## How it works
 
 ```
-recording.json ──ingest──▶ clicks.json ─┐
-       │                                ├─merge──▶ session.json ──▶ segmenter_agent → tracer_agent → …
-       └───────replay────▶ network.json ┘
+ recording.json ─▶ ingest ─▶ clicks.json ─┐
+       │                                   ├─▶ merge ─▶ session.json
+       └────────▶ replay ─▶ network.json ─┘        (every click + its backend calls)
+                  (Puppeteer against Odoo,
+                   database restored first)
+                                                       │
+            LangGraph pipeline (resumable, one trace per run in LangSmith)
+ ┌──────────────────────────────────────────────────────────────────────────────┐
+ │ segment ─▶ trace ─▶ assess ─▶ plan ─▶ [person approves] ─▶ build ─▶ deliver │
+ └──────────────────────────────────────────────────────────────────────────────┘
+   tasks      code      effort    plan.md                    module,     push, PR, email:
+   & labels   & why     & friction                           tests,      each one approved
+                                                             replay      by a person
 ```
 
-## Setup
+Each stage reads one file and writes one, validated by a Pydantic contract
+(`src/odoo_miner/models.py`, `src/odoo_miner/agents/contracts.py`), so any
+stage can be rerun, inspected or replaced on its own. Each is a CLI command and
+a node in the same graph.
 
-### 1. Odoo 18 in Docker
+## How it is kept safe
 
-`docker-compose.yml` runs Odoo 18 Community and PostgreSQL 16. The CLI and the
-replay run on your machine and talk to Odoo at `http://localhost:8069`.
+- **Model output is checked by code.** Segmentations must cover every step
+  exactly once (one retry with the errors, then a hard failure). Code
+  references the tracer invents are dropped unless the file and line exist.
+  The assessor can move a computed score by at most one point. Every file and
+  line a plan cites is checked against the source, and what cannot be
+  confirmed is shown to the approver.
+- **A person approves the plan, then every outward action.** The build only
+  starts after the plan is approved, and each push, pull request and email
+  pauses again. A test fails if any outward tool is not gated.
+- **Outward actions are narrow.** The builder can only write inside its own
+  module folder and Odoo's source is read-only to every agent. Pushes go to
+  `feat/<module>` from a temporary git worktree - never the base branch, never
+  your checkout - and can only carry the approved module. Email goes only to
+  the configured address, over TLS.
+- **Everything is on the record.** Approvals and outward actions are appended
+  to `out/audit.jsonl` (who, when, what, outcome); every model call is traced
+  in LangSmith with the run and stage.
+- **Tests need nothing.** 160 tests run with no API key, no Odoo and no
+  network; they cannot send mail, push, or emit traces. CI runs them and ruff
+  on every push.
+
+## Quick start
+
+Needs Docker, Python 3.11+, [uv](https://docs.astral.sh/uv/), Node 18+ and Chrome
+(the replay installs its own).
 
 ```bash
-./scripts/init_db.sh          # creates "demo" with Purchase, Inventory, Invoicing (admin / admin)
-python3 scripts/seed.py        # adds the purchasing scenarios below
-./scripts/snapshot_db.sh      # saves "demo_snapshot"; replays reset to this
+uv sync --extra dev
+(cd replay && npm install)
+cp .env.example .env                 # add ANTHROPIC_API_KEY; LangSmith and SMTP are optional
+
+docker compose up -d
+./scripts/init_db.sh                 # "demo" database with Purchase, Inventory, Invoicing
+uv run python scripts/seed.py        # the purchasing scenarios below
+./scripts/snapshot_db.sh             # every replay starts from this state
+git clone --depth 1 -b 18.0 https://github.com/odoo/odoo vendor/odoo   # for the tracer
+
+uv run odoo-miner doctor             # checks all of the above
+uv run odoo-miner run tests/fixtures/rfq_to_payment.json -d out/rfq_to_payment \
+  --pre-hook ./scripts/restore_db.sh
+uv run odoo-miner analyze out/rfq_to_payment --until approve
 ```
+
+The last command stops at the approval gate with the plan in
+`out/rfq_to_payment/plan.md`; `odoo-miner report out/rfq_to_payment` emails it
+with screenshots of where the buyer got stuck (add `--screenshots` to the
+`run` command to capture them). [`docs/RUNBOOK.md`](docs/RUNBOOK.md) covers every
+step, what to expect, and what to do when something fails.
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `odoo-miner doctor` | Checks keys, Odoo, databases, source checkout, replay, email and GitHub; flags shell variables overriding `.env`. |
+| `odoo-miner run REC -d DIR` | Ingest, replay and merge one recording into `DIR`. |
+| `odoo-miner ingest` / `replay` / `merge` | The same three steps separately. |
+| `odoo-miner show FILE` | A click log or session as a table. |
+| `odoo-miner segment` / `trace` / `assess` / `plan` | One analysis stage. `assess --offline` needs no API key. |
+| `odoo-miner analyze DIR [--until STAGE]` | The stages as one resumable pipeline. |
+| `odoo-miner analyze DIR --approve` / `--reject --notes "…"` | Answer whichever approval the pipeline is waiting on. |
+| `odoo-miner report DIR` | Email the plan and screenshots of where the user got stuck to `REPORT_EMAIL_TO`, after you confirm. |
+| `odoo-miner audit [--run NAME]` | The audit log as a table: who approved or rejected what, and what was sent out. |
+
+## Setup details
+
+`docker-compose.yml` runs Odoo 18 Community and PostgreSQL 16. The CLI and the
+replay run on your machine and talk to Odoo at `http://localhost:8069`
+(`admin` / `admin`).
 
 The seed creates five confirmed purchase orders, receives the goods, and
 leaves a draft vendor bill on each for a buyer to work through:
@@ -42,43 +168,21 @@ Re-running the seed skips scenarios that already exist.
 
 `./scripts/restore_db.sh` resets `demo` to the snapshot: it stops Odoo,
 recreates the database from the snapshot, copies the attachments folder back
-and starts Odoo again. Pass it as `--pre-hook` so every replay starts from the
-same data. Custom modules go in `addons/`, which is mounted into the container.
+and starts Odoo again - and starts it again if anything fails on the way. Pass
+it as `--pre-hook` so every replay starts from the same data. Custom modules go
+in `addons/`, which is mounted into the container.
 
-For the agents that read Odoo's code, clone the matching source next to the
-project: `git clone --depth 1 -b 18.0 https://github.com/odoo/odoo`.
-
-### 2. The CLI and replay
-
-```bash
-uv sync --extra dev          # or: python -m venv .venv && pip install -e '.[dev]'
-
-# Replay needs Node 18+ and downloads Chrome on first install
-cd replay && npm install && cd ..
-```
-
-Python 3.11 or newer. Run commands with `uv run odoo-miner ...`, or activate
-the environment with `source .venv/bin/activate`.
-
-## Usage
+## Recording a workflow
 
 1. In Chrome, open DevTools → **Recorder**, record the workflow in Odoo, and
-   export it as **JSON**.
-2. Run the pipeline:
+   export it as **JSON**. Start from the login page, or pass your session
+   cookie with `--cookie "session_id=…"`.
+2. Replay it and analyze it:
 
 ```bash
-odoo-miner run recording.json -d out/ \
-  --cookie "session_id=<your Odoo session cookie>" \
-  --pre-hook "./scripts/restore_db.sh"
-odoo-miner show out/session.json
-```
-
-Or run the stages separately:
-
-```bash
-odoo-miner ingest recording.json -o clicks.json
-odoo-miner replay recording.json -o network.json --cookie "session_id=…"
-odoo-miner merge clicks.json network.json -o session.json
+uv run odoo-miner run recording.json -d out/my_run --pre-hook ./scripts/restore_db.sh
+uv run odoo-miner show out/my_run/session.json
+uv run odoo-miner analyze out/my_run --until assess
 ```
 
 `--skip-replay` on `run` (or `merge` without a network file) gives you clicks
@@ -91,64 +195,23 @@ only, with no backend calls.
 | `clicks.json` | `ClickLog` | Each step's type, target (aria label, visible text, `name` attribute, CSS), typed value, the page URL it happened on, and Odoo context parsed from that URL (model, record id, action, view type). |
 | `network.json` | `NetworkLog` | Every Odoo RPC fired during replay (`call_kw`, `call_button`, `action/load`, `/json/2`), with model, method, args, status and the recording step that was running. |
 | `session.json` | `Session` | Clicks with their backend calls attached, each call tagged `read` / `write` / `compute` / `action_load` / `unknown`, plus `has_write` per step. |
-
-Schemas live in `src/odoo_miner/models.py`; every stage reads and writes these,
-so a stage can be inspected or re-run on its own.
-
-## Analysis stages
-
-On top of `session.json`, a pipeline of agents finds the friction and plans a
-fix. Each stage reads one file and writes one file, has a CLI subcommand, and
-is a node in the same LangGraph pipeline. See `docs/AGENT_BUILD_GUIDE.md`.
-
-```bash
-odoo-miner segment out/run/session.json -o out/run/segments.json
-odoo-miner trace   out/run/segments.json --session out/run/session.json -o out/run/traces.json
-odoo-miner assess  out/run/segments.json --session out/run/session.json -o out/run/assessment.json
-odoo-miner plan    out/run
-```
-
-Or run them as one resumable, traced pipeline:
-
-```bash
-odoo-miner analyze out/run                      # the whole thing
-odoo-miner analyze out/run --until assess       # stop before planning
-odoo-miner analyze out/run --approve --thread run   # answer the approval gate
-```
-
-| File | Model | Contents |
-|---|---|---|
-| `segments.json` | `SegmentLog` | Steps grouped into one-thing-each segments, each labelled in business language, with the record it touched and whether it completed, failed or recovered. |
-| `traces.json` | `TraceLog` | Per segment: retrieval / action / navigation / mixed, the Odoo methods that ran (`file:line`, override chain included), the data looked up, and a plain-language explanation. |
-| `assessment.json` | `Assessment` | A 1-5 difficulty score per step from signals detected in code (typing, lookup, tab switch, screen change, modal, error, backtrack, hidden field, wasted click), plus effort and friction per segment. |
-| `plan.json` / `plan.md` | `Plan` | Whether to change anything - no change, data fix, configuration or a new module - with the views and methods to extend, what it saves, acceptance criteria and risks. |
-| `build.json` | `BuildResult` | The branch and commit, whether tests passed, whether the replay completed, and effort before against after. |
-
-These stages call a model, so they need `ANTHROPIC_API_KEY` in `.env` (copy
-`.env.example`). Two exceptions run offline: `assess --offline` produces the
-deterministic scores with no model call, and `python evals/run_evals.py check`
-scores the evaluators themselves. `pytest` never needs a key.
-
-The agents read Odoo's source to explain what the backend did, so clone it
-next to the project:
-
-```bash
-git clone --depth 1 -b 18.0 https://github.com/odoo/odoo vendor/odoo
-```
-
-Without it the stages still run; they just cannot resolve code references.
+| `segments.json` | `SegmentLog` | Steps grouped into one-thing-each tasks, labelled in business language, with the record touched and whether it completed, failed or recovered. |
+| `traces.json` | `TraceLog` | Per task: retrieval / action / navigation / mixed, the Odoo methods that ran (`file:line`, override chain included), the data looked up, and a plain-language explanation. |
+| `assessment.json` | `Assessment` | A 1-5 difficulty score per step from signals detected in code, plus effort and friction per task. |
+| `plan.json` / `plan.md` | `Plan` | No change, data fix, configuration or a new module - with the views and methods involved, what it saves, acceptance criteria, risks, and any citation the check could not confirm. |
+| `build.json` | `BuildResult` | Branch, commit, pull request, test result, replay result, and effort before against after. |
+| `audit.jsonl` | - | One line per approval and outward action. |
 
 ## Things to know
 
 - **Replay repeats every write.** If the recording posts a bill, so does the
-  replay. Restore the database before each run with `--pre-hook` (for Odoo in
-  Docker, a `pg_restore` or Odoo's database duplicate/restore). The replay
+  replay. Restore the database before each run with `--pre-hook`; the replay
   aborts if the hook fails.
-- **Login.** Replay starts a fresh browser. Pass your session cookie with
-  `--cookie`, or include the login steps in the recording.
 - **No human timing.** The Recorder format stores no timestamps, and replay
   timestamps reflect the replay, not the person. Difficulty is scored from
   structure, not time.
+- **Odoo 18 does not change the URL for most screens**, so `page.model` is
+  usually empty. The model a step worked on comes from its backend calls.
 - **Which element gets clicked.** The Recorder saves several alternative
   selectors per step and the replay library normally clicks whichever matches
   first. On Odoo that can pick the wrong element (for example `a.focus`, the
@@ -160,28 +223,43 @@ Without it the stages still run; they just cannot resolve code references.
   `selectors_used`.
 - **Late requests.** After each step the replay waits until no Odoo backend
   call has been in flight for `--settle` ms (default 500), so onchange/autosave
-  calls land on the step that caused them. Only backend calls count, because
-  Odoo keeps other connections open permanently.
+  calls land on the step that caused them.
 - **Debugging a failed replay.** On failure the replay saves
   `network.failure.png` next to `network.json` showing the page where it
-  stopped. Add `--screenshots` to `run` to save a screenshot after every step.
+  stopped. Add `--screenshots` to save one after every step.
 - **New-tab steps are skipped.** Recordings started from a new tab begin with
   `chrome://newtab`, which a fresh browser can't open; both ingest and replay
   skip browser-internal pages and keep the original step numbers.
 - **Call kinds are hints.** The read/write classification uses known Odoo
-  method names and `action_`/`button_` prefixes. Custom methods come out as
-  `unknown` for `tracer_agent` to resolve against the backend code.
-- **URL parsing.** Both the legacy `/web#model=…&id=…` style and the Odoo 18
-  `/odoo/…` path style are handled. Odoo 18 paths encode the breadcrumb trail
-  (`/odoo/action-245/1042/action-388/77`); the parser follows Odoo's own router
-  rules and reports the last screen, with the full trail kept in `path_slugs`.
+  method names and `action_`/`button_` prefixes. The tracer corrects them
+  against the source.
+- **Shell variables win over `.env`.** That is deliberate - a deployment can
+  override the file - but a stale `export SMTP_PORT=587` once broke email
+  silently. `odoo-miner doctor` reports any variable that overrides `.env`.
 
-## Tests
+## Development
 
 ```bash
-pytest
+uv run pytest                        # 160 tests, no API key or Odoo needed
+uv run ruff check src tests evals scripts
+uv run python evals/run_evals.py check   # evaluators against the gold labels, offline
+uv run langgraph dev                 # the pipeline in LangGraph Studio
 ```
 
-The fixture in `tests/fixtures/` is a hand-written vendor-bill workflow
-(open bill → check PO → check receipt → fix price → confirm). Replace it with
-real recordings as you capture them.
+Rules for changes - contracts, milestones, what must never happen - are in
+[`AGENTS.md`](AGENTS.md).
+
+## Project layout
+
+```
+src/odoo_miner/
+  cli.py  recorder.py  merge.py  models.py  odoo_urls.py  doctor.py
+  agents/      config, contracts, one module per stage, audit log, prompts/
+  agents/tools/  odoo_source (search Odoo's code), odoo_ops (Docker, replay), delivery (push, PR, email)
+  pipeline/    LangGraph state and graph
+replay/        Puppeteer replay that captures backend calls per step
+scripts/       database init, seed, snapshot, restore
+evals/         gold labels and LangSmith evaluators
+tests/         unit and integration tests, recordings and sessions as fixtures
+docs/          runbook and the agent build guide
+```

@@ -9,12 +9,16 @@ asked for in the prompt.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..models import Session, SessionClick
-from .config import load_prompt, model_for, settings, trace_config
+from .config import chat_model, load_prompt, settings, trace_config
 from .contracts import (
-    Assessment, Segment, SegmentAssessment, SegmentLog, StepDifficulty,
+    Assessment,
+    Segment,
+    SegmentAssessment,
+    SegmentLog,
+    StepDifficulty,
 )
 from .tools import odoo_source
 
@@ -23,7 +27,20 @@ MAX_ADJUSTMENT = 1
 
 # Wizards whose appearance means a modal opened.
 WIZARD_HINTS = (".wizard", "account.payment.register")
-TAB_HINTS = ("nav-link", "o_notebook", "nav-item")
+TAB_HINTS = ("nav-link", "nav-item")
+
+
+def normalise_label(text: str | None) -> str:
+    """A label as the view spells it: no non-breaking spaces, no trailing "?".
+
+    Odoo renders some field labels with a non-breaking space, and the Recorder
+    captures it verbatim ("Sales\xa0Price?"), so a raw comparison against the
+    view's `string="Sales Price"` can never match.
+    """
+    if not text:
+        return ""
+    collapsed = " ".join(text.replace("\xa0", " ").split())
+    return collapsed.rstrip("?").strip().lower()
 DIALOG_HINTS = ("dialog_", "o_dialog", "modal")
 
 
@@ -36,8 +53,12 @@ def _selectors(click: SessionClick) -> str:
 def signals_for(
     click: SessionClick,
     previous_models: list[str],
-    visited: set[tuple[str, Optional[int]]],
-    hidden_fields: Optional[set[str]] = None,
+    visited: set[tuple[str, int | None]],
+    hidden_fields: dict[str, set[str]] | None = None,
+    next_click: SessionClick | None = None,
+    models_in_scope: set[str] | None = None,
+    tab_opened_earlier: bool = False,
+    page_labels: dict[str, set[str]] | None = None,
 ) -> dict[str, float]:
     """Detect each difficulty signal for one step. 0/1 per signal."""
     selectors = _selectors(click).lower()
@@ -45,20 +66,25 @@ def signals_for(
     models = [c.model for c in calls if c.model]
     methods = {c.method for c in calls if c.method}
 
+    label = normalise_label(
+        (click.target.aria_label or click.target.text) if click.target else None
+    )
+
     typing = 1.0 if click.type == "change" else 0.0
     lookup = 1.0 if {"name_search", "web_name_search"} & methods else 0.0
     tab_switch = 1.0 if any(h in selectors for h in TAB_HINTS) else 0.0
+    if not tab_switch and click.type == "click" and label and page_labels:
+        in_scope: set[str] = set()
+        for model in (models_in_scope or set()):
+            in_scope |= page_labels.get(model, set())
+        tab_switch = 1.0 if label in in_scope else 0.0
 
     screen_change = 0.0
-    if any(c.kind == "action_load" for c in calls):
-        screen_change = 1.0
-    elif models and previous_models and models[0] != previous_models[-1]:
+    if any(c.kind == "action_load" for c in calls) or models and previous_models and models[0] != previous_models[-1]:
         screen_change = 1.0
 
     modal = 0.0
-    if any(h in selectors for h in DIALOG_HINTS):
-        modal = 1.0
-    elif any(any(w in (m or "") for w in WIZARD_HINTS) for m in models):
+    if any(h in selectors for h in DIALOG_HINTS) or any(any(w in (m or "") for w in WIZARD_HINTS) for m in models):
         modal = 1.0
 
     error = 1.0 if any(c.rpc_error for c in calls) else 0.0
@@ -71,14 +97,21 @@ def signals_for(
             break
 
     hidden_field = 0.0
-    if click.type == "change" and hidden_fields:
-        label = (click.target.aria_label or click.target.text or "") if click.target else ""
-        if label and any(label.strip().rstrip("?").lower() == f.lower() for f in hidden_fields):
+    if click.type == "change":
+        candidates: set[str] = set()
+        for model in (models_in_scope or set()):
+            candidates |= (hidden_fields or {}).get(model, set())
+        if label and any(label == normalise_label(name) for name in candidates) or tab_opened_earlier:
             hidden_field = 1.0
-    if click.type == "change" and tab_switch:
-        hidden_field = max(hidden_field, 1.0)
 
-    wasted_click = 1.0 if (click.type == "click" and not calls) else 0.0
+    # A click with no calls that is immediately followed by typing was
+    # focusing the field, not wasted: it takes both halves to be waste.
+    # Opening a tab is navigation, not waste - and counting it as both would
+    # charge the same click twice.
+    leads_to_typing = next_click is not None and next_click.type in ("change", "doubleClick")
+    wasted_click = 1.0 if (
+        click.type == "click" and not calls and not leads_to_typing and not tab_switch
+    ) else 0.0
 
     return {
         "typing": typing, "lookup": lookup, "tab_switch": tab_switch,
@@ -88,31 +121,83 @@ def signals_for(
     }
 
 
-def score_from(signals: dict[str, float], weights: Optional[dict[str, float]] = None) -> int:
+def score_from(signals: dict[str, float], weights: dict[str, float] | None = None) -> int:
     """clamp(1 + sum(weight x signal), 1, 5)."""
     weights = weights or settings().weights
     total = 1.0 + sum(weights.get(name, 0.0) * value for name, value in signals.items())
     return int(max(MIN_SCORE, min(MAX_SCORE, round(total))))
 
 
-def hidden_fields_for(session: Session) -> set[str]:
+def hidden_fields_for(session: Session) -> dict[str, set[str]]:
     """Field labels that sit behind a notebook page or are conditionally invisible.
 
-    Needs the Odoo source; returns an empty set without it, which only means
+    Keyed by model: a label that is hidden on one model must not mark a
+    same-named field on another ("Email" is behind a page somewhere, but the
+    login box is not). Variant models inherit their template's views, so
+    `x.product` also gets `x.template`'s hidden fields.
+
+    Needs the Odoo source; returns an empty map without it, which only means
     the `hidden_field` signal falls back to the notebook-tab heuristic.
     """
     if not odoo_source.source_available():
-        return set()
+        return {}
     models = {c.model for click in session.clicks for c in click.calls if c.model}
-    hidden: set[str] = set()
-    for model in sorted(models):
+    lookup = set(models)
+    for model in models:                     # product.product reuses product.template's views
+        if model.endswith(".product"):
+            lookup.add(model.rsplit(".", 1)[0] + ".template")
+
+    hidden: dict[str, set[str]] = {}
+    for model in sorted(lookup):
         try:
-            for entry in odoo_source.find_view_fields(model):
-                if entry.get("page") or entry.get("invisible"):
-                    hidden.add(entry["field"])
+            entries = odoo_source.find_view_fields(model)
         except odoo_source.SourceUnavailable:
             break
+        for entry in entries:
+            if not (entry.get("page") or entry.get("invisible")):
+                continue
+            names = hidden.setdefault(model, set())
+            names.add(entry["field"])
+            if entry.get("string"):          # the label the user actually sees
+                names.add(entry["string"])
+
+    for model in list(models):               # fold the template's back onto the variant
+        if model.endswith(".product"):
+            template = model.rsplit(".", 1)[0] + ".template"
+            if template in hidden:
+                hidden.setdefault(model, set()).update(hidden[template])
     return hidden
+
+
+def page_labels_for(session: Session) -> dict[str, set[str]]:
+    """Notebook page labels per model, normalised.
+
+    Keyed by model so a page named "Purchase" on `product.template` does not
+    turn the Purchase app menu into a tab switch.
+    """
+    if not odoo_source.source_available():
+        return {}
+    models = {c.model for click in session.clicks for c in click.calls if c.model}
+    lookup = set(models)
+    for model in models:
+        if model.endswith(".product"):
+            lookup.add(model.rsplit(".", 1)[0] + ".template")
+
+    labels: dict[str, set[str]] = {}
+    for model in sorted(lookup):
+        try:
+            found = {normalise_label(page) for page in odoo_source.find_view_pages(model)}
+        except odoo_source.SourceUnavailable:
+            break
+        if found:
+            labels[model] = {label for label in found if label}
+
+    for model in list(models):
+        if model.endswith(".product"):
+            template = model.rsplit(".", 1)[0] + ".template"
+            if template in labels:
+                labels.setdefault(model, set()).update(labels[template])
+    return labels
 
 
 def assess_steps(session: Session, segments: SegmentLog) -> dict[str, list[StepDifficulty]]:
@@ -122,19 +207,32 @@ def assess_steps(session: Session, segments: SegmentLog) -> dict[str, list[StepD
     real history, not just the steps of one segment.
     """
     hidden = hidden_fields_for(session)
+    pages = page_labels_for(session)
     owner = {i: seg.segment_id for seg in segments.segments for i in seg.step_indexes}
 
     out: dict[str, list[StepDifficulty]] = {seg.segment_id: [] for seg in segments.segments}
     seen_models: list[str] = []
-    visited_in_segment: dict[str, set[tuple[str, Optional[int]]]] = {}
-    unassigned: set[tuple[str, Optional[int]]] = set()
+    visited_in_segment: dict[str, set[tuple[str, int | None]]] = {}
+    unassigned: set[tuple[str, int | None]] = set()
 
-    for click in session.clicks:
+    models_seen: dict[str, set[str]] = {}
+    tab_opened: set[str] = set()
+
+    clicks = session.clicks
+    for position, click in enumerate(clicks):
         segment_id = owner.get(click.step_index)
         # A backtrack means returning to something visited earlier in the same
         # segment; across segments it is just the next task.
         visited = visited_in_segment.setdefault(segment_id, set()) if segment_id else unassigned
-        signals = signals_for(click, seen_models, visited, hidden)
+        following = clicks[position + 1] if position + 1 < len(clicks) else None
+        scope = models_seen.setdefault(segment_id, set()) if segment_id else set()
+        signals = signals_for(
+            click, seen_models, visited, hidden, next_click=following,
+            models_in_scope=scope, tab_opened_earlier=segment_id in tab_opened,
+            page_labels=pages,
+        )
+        if signals.get("tab_switch") and segment_id:
+            tab_opened.add(segment_id)
         if segment_id is not None:
             out.setdefault(segment_id, []).append(
                 StepDifficulty(
@@ -146,6 +244,8 @@ def assess_steps(session: Session, segments: SegmentLog) -> dict[str, list[StepD
         for model in [c.model for c in click.calls if c.model]:
             visited.add((model, click.page.record_id))
             seen_models.append(model)
+            if segment_id:
+                models_seen.setdefault(segment_id, set()).add(model)
 
     return out
 
@@ -246,11 +346,11 @@ def render_segment(seg: Segment, assessment: SegmentAssessment, session: Session
     return "\n".join(lines)
 
 
-def build_assessor(model: Optional[str] = None):
+def build_assessor(model: str | None = None):
     from langchain.agents import create_agent
 
     return create_agent(
-        model=model or model_for("assessor"),
+        model=model or chat_model("assessor"),
         tools=[],
         system_prompt=load_prompt("assessor"),
         response_format=SegmentAssessment,

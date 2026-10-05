@@ -20,3 +20,6 @@ out/
 
 # Odoo source checkout for the agents (ODOO_SOURCE)
 vendor/
+
+# Local state written by `langgraph dev`
+.langgraph_api/

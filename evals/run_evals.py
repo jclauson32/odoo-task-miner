@@ -20,16 +20,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from odoo_miner.agents.assessor import assess_deterministic          # noqa: E402
-from odoo_miner.agents.contracts import SegmentLog                    # noqa: E402
-from odoo_miner.agents.segmenter import run_segmenter                 # noqa: E402
-from odoo_miner.models import Session                                 # noqa: E402
+from odoo_miner.agents.assessor import assess_deterministic  # noqa: E402
+from odoo_miner.agents.config import load_env  # noqa: E402
+from odoo_miner.agents.contracts import SegmentLog  # noqa: E402
+from odoo_miner.agents.segmenter import run_segmenter  # noqa: E402
+from odoo_miner.models import Session  # noqa: E402
 
+# Each dataset mirrors these entries exactly: `push` updates matching examples,
+# creates missing ones and deletes any others, so this file is the source of
+# truth. Paths are relative to the repository; the gold labels describe the
+# committed session they sit next to. Add a recording by adding an entry.
 DATASETS = {
-    "odoo-miner/segmenter": {
-        "gold": ROOT / "evals/datasets/rfq_to_payment.segments.json",
-        "session": ROOT / "out/rfq_to_payment/session.json",
-    },
+    "odoo-miner/segmenter": [
+        {
+            "gold": "evals/datasets/rfq_to_payment.segments.json",
+            "session": "tests/fixtures/rfq_to_payment.session.json",
+        },
+    ],
 }
 
 
@@ -85,7 +92,7 @@ def label_quality(outputs: dict, reference_outputs: dict) -> dict:
     if not segments:
         return {"key": "label_quality", "score": 0.0, "comment": "no segments"}
     labels = [(s.get("label") or "").strip() for s in segments]
-    specific = [l for l in labels if len(l.split()) >= 3]
+    specific = [label for label in labels if len(label.split()) >= 3]
     unique = len(set(labels)) == len(labels)
     score = (len(specific) / len(labels)) * (1.0 if unique else 0.5)
     return {
@@ -202,23 +209,36 @@ ASSESSOR_EVALUATORS = [scores_match, adjustments_within_one]
 
 
 def push_datasets() -> None:
+    """Make each LangSmith dataset match DATASETS exactly. Safe to rerun."""
     from langsmith import Client
 
     client = Client()
-    for name, paths in DATASETS.items():
-        gold = SegmentLog.model_validate_json(paths["gold"].read_text(encoding="utf-8"))
+    for name, entries in DATASETS.items():
         if client.has_dataset(dataset_name=name):
             dataset = client.read_dataset(dataset_name=name)
         else:
             dataset = client.create_dataset(dataset_name=name)
-        client.create_examples(
-            dataset_id=dataset.id,
-            examples=[{
-                "inputs": {"session_path": str(paths["session"])},
-                "outputs": {"segments": [s.model_dump() for s in gold.segments]},
-            }],
-        )
-        print(f"pushed {len(gold.segments)} gold segments to {name}")
+
+        wanted = {}
+        for entry in entries:
+            gold = SegmentLog.model_validate_json((ROOT / entry["gold"]).read_text(encoding="utf-8"))
+            wanted[entry["session"]] = {"segments": [s.model_dump() for s in gold.segments]}
+
+        created = updated = deleted = 0
+        for example in client.list_examples(dataset_id=dataset.id):
+            session = (example.inputs or {}).get("session_path")
+            if session in wanted:
+                client.update_example(example.id, inputs={"session_path": session},
+                                      outputs=wanted.pop(session))
+                updated += 1
+            else:
+                client.delete_example(example.id)
+                deleted += 1
+        for session, outputs in wanted.items():
+            client.create_examples(dataset_id=dataset.id,
+                                   examples=[{"inputs": {"session_path": session}, "outputs": outputs}])
+            created += 1
+        print(f"{name}: {created} created, {updated} updated, {deleted} stale removed")
 
 
 def evaluate_segmenter(prefix: str = "segmenter-v1") -> None:
@@ -228,7 +248,7 @@ def evaluate_segmenter(prefix: str = "segmenter-v1") -> None:
 
     def target(inputs: dict) -> dict:
         session = Session.model_validate_json(
-            Path(inputs["session_path"]).read_text(encoding="utf-8")
+            (ROOT / inputs["session_path"]).read_text(encoding="utf-8")
         )
         return {"segments": [s.model_dump() for s in run_segmenter(session).segments]}
 
@@ -245,7 +265,7 @@ def check_offline() -> int:
 
     A sanity check for the evaluators themselves: no API key, no LangSmith.
     """
-    paths = DATASETS["odoo-miner/segmenter"]
+    paths = {key: ROOT / value for key, value in DATASETS["odoo-miner/segmenter"][0].items()}
     gold = json.loads(paths["gold"].read_text(encoding="utf-8"))
     reference = {"segments": gold["segments"]}
 
@@ -279,6 +299,7 @@ def main() -> int:
     )
     parser.add_argument("--prefix", default="segmenter-v1")
     args = parser.parse_args()
+    load_env()            # LangSmith credentials come from .env
 
     if args.command == "push":
         push_datasets()

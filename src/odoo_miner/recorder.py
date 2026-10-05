@@ -6,10 +6,11 @@ Note the format records the order of steps but no timestamps.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .models import Click, ClickLog, Target
 from .odoo_urls import parse_odoo_url
@@ -22,6 +23,16 @@ NOISE_STEPS = {"keyUp"}
 BROWSER_PAGE = re.compile(r"^(chrome|about|edge|brave|chrome-search):")
 
 _NAME_ATTR = re.compile(r"\[name=['\"]?([\w.\-]+)['\"]?\]")
+
+# Values typed into fields like these are replaced at ingest. The analysis never
+# needs them, and clicks.json / session.json are sent to the model and stored in
+# traces. Replay reads the original recording, so it can still log in.
+SECRET_FIELD = re.compile(r"passw(or)?d|\bpwd\b|passcode|secret|token|api[\s_-]?key|\botp\b|totp", re.I)
+REDACTED = "<redacted>"
+
+
+def is_secret_field(target: Target | None) -> bool:
+    return target is not None and bool(SECRET_FIELD.search(" ".join(target.selectors)))
 
 
 class RecordingError(ValueError):
@@ -36,10 +47,11 @@ def _flatten_selector(selector: Any) -> str:
 
 
 _ROLE_SUFFIX = re.compile(r"\[role=.*\]$")
-_ICON_GLYPHS = re.compile("[-]")  # icon-font characters, not words
+# Icon fonts draw their glyphs from the Unicode Private Use Area; they are not words.
+_ICON_GLYPHS = re.compile("[\ue000-\uf8ff]")
 
 
-def _aria_label(parts: list[str]) -> Optional[str]:
+def _aria_label(parts: list[str]) -> str | None:
     """Readable accessible name from an aria selector chain.
 
     The Recorder often targets an icon inside a button, giving chains like
@@ -55,7 +67,7 @@ def _aria_label(parts: list[str]) -> Optional[str]:
     return None
 
 
-def parse_target(raw_selectors: Optional[list]) -> Optional[Target]:
+def parse_target(raw_selectors: list | None) -> Target | None:
     if not raw_selectors:
         return None
 
@@ -82,7 +94,7 @@ def parse_target(raw_selectors: Optional[list]) -> Optional[Target]:
     return target
 
 
-def _navigation_url(step: dict) -> Optional[str]:
+def _navigation_url(step: dict) -> str | None:
     for event in step.get("assertedEvents") or []:
         if event.get("type") == "navigation" and event.get("url"):
             return event["url"]
@@ -94,7 +106,7 @@ def parse_recording(data: dict, source: str = "<memory>", keep_noise: bool = Fal
         raise RecordingError("Not a Chrome Recorder export: expected an object with a 'steps' list.")
 
     clicks: list[Click] = []
-    current_url: Optional[str] = None
+    current_url: str | None = None
 
     for step_index, step in enumerate(data["steps"]):
         step_type = step.get("type")
@@ -116,13 +128,17 @@ def parse_recording(data: dict, source: str = "<memory>", keep_noise: bool = Fal
 
         if not skip:
             page_url = step.get("url") if step_type == "navigate" else current_url
+            target = parse_target(step.get("selectors"))
+            value = step.get("value")
+            if value is not None and is_secret_field(target):
+                value = REDACTED
             clicks.append(
                 Click(
                     index=len(clicks),
                     step_index=step_index,
                     type=step_type,
-                    target=parse_target(step.get("selectors")),
-                    value=step.get("value"),
+                    target=target,
+                    value=value,
                     key=step.get("key"),
                     url=step.get("url") if step_type == "navigate" else None,
                     page_url=page_url,
@@ -143,3 +159,43 @@ def load_recording(path: Path, keep_noise: bool = False) -> ClickLog:
     except json.JSONDecodeError as exc:
         raise RecordingError(f"{path} is not valid JSON: {exc}") from exc
     return parse_recording(data, source=str(path), keep_noise=keep_noise)
+
+
+def _first_selector(step: dict) -> str | None:
+    selectors = step.get("selectors") or []
+    return _flatten_selector(selectors[0]) if selectors else None
+
+
+def redact_recording(data: dict) -> dict:
+    """A copy of a recording with every value typed into a secret field replaced.
+
+    This is the copy an agent may read and edit; `rehydrate_secrets` puts the
+    real values back just before a replay.
+    """
+    out = copy.deepcopy(data)
+    for step in out.get("steps", []):
+        if step.get("value") is not None and is_secret_field(parse_target(step.get("selectors"))):
+            step["value"] = REDACTED
+    return out
+
+
+def rehydrate_secrets(recording: dict, original: dict) -> dict:
+    """Restore redacted values from the original recording, matched by the step's first selector.
+
+    Raises RecordingError when a redacted value has no counterpart, rather than
+    replaying a login with the literal text "<redacted>".
+    """
+    secrets = {
+        _first_selector(step): step["value"]
+        for step in original.get("steps", [])
+        if step.get("value") not in (None, REDACTED) and _first_selector(step)
+        and is_secret_field(parse_target(step.get("selectors")))
+    }
+    out = copy.deepcopy(recording)
+    for step in out.get("steps", []):
+        if step.get("value") == REDACTED:
+            key = _first_selector(step)
+            if key not in secrets:
+                raise RecordingError(f"No original value for the redacted field {key!r}.")
+            step["value"] = secrets[key]
+    return out

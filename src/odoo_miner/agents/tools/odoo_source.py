@@ -15,6 +15,7 @@ import ast
 import json
 import re
 import subprocess
+import time
 from collections.abc import Iterable
 from functools import lru_cache
 from pathlib import Path
@@ -345,25 +346,39 @@ def _fields_in_record(
 # ---------------------------------------------------------------- installed modules
 
 
+# How long a fetched module list is trusted before asking Odoo again.
+INSTALLED_MODULES_TTL = 6 * 3600
+
+
+def _modules_cache() -> Path:
+    return Path("out") / ".cache" / f"installed_modules.{settings().odoo_db}.json"
+
+
 @lru_cache(maxsize=1)
 def installed_modules() -> frozenset[str]:
     """Modules installed in the demo database, via the same JSON-RPC Odoo exposes.
 
-    Cached for the process. Returns an empty set when Odoo is not reachable,
-    and callers then simply do not filter - a missing Odoo must not turn a
-    source search into an error.
+    Asked once per process and cached on disk for INSTALLED_MODULES_TTL, per
+    database. When Odoo is unreachable, an expired cache is still used - a
+    slightly old list filters better than none - and with no cache at all
+    the result is empty, so callers simply do not filter. A missing Odoo must
+    not turn a source search into an error.
     """
-    cache = Path("out") / "installed_modules.json"
+    cache = _modules_cache()
+    cached: frozenset[str] = frozenset()
     if cache.exists():
         try:
-            return frozenset(json.loads(cache.read_text(encoding="utf-8")))
+            cached = frozenset(json.loads(cache.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
-            pass
+            cached = frozenset()
+        if cached and time.time() - cache.stat().st_mtime < INSTALLED_MODULES_TTL:
+            return cached
 
     names = _fetch_installed_modules()
-    if names:
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(sorted(names), indent=2), encoding="utf-8")
+    if not names:
+        return cached
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(sorted(names), indent=2), encoding="utf-8")
     return frozenset(names)
 
 

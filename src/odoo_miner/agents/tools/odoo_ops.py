@@ -9,15 +9,20 @@ from __future__ import annotations
 import json
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from ..config import settings
 
 COMPOSE = ["docker", "compose"]
 DEFAULT_TIMEOUT = 900
+# docker-compose.yml and scripts/ live at the repository root; run from there
+# whatever the caller's working directory is.
+REPO_ROOT = Path(__file__).resolve().parents[4]
+RESTORE_HOOK = str(REPO_ROOT / "scripts" / "restore_db.sh")
 
 
-def _run(cmd: list[str], timeout: int = DEFAULT_TIMEOUT, cwd: Path | None = None) -> tuple[int, str]:
+def _run(cmd: list[str], timeout: int = DEFAULT_TIMEOUT, cwd: Path | None = REPO_ROOT) -> tuple[int, str]:
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, cwd=str(cwd) if cwd else None
@@ -55,7 +60,8 @@ def run_module_tests(name: str, run_dir: str | None = None) -> str:
 
     Args:
         name: module directory name under addons/.
-        run_dir: where to write tests.log. Defaults to the module's own folder.
+        run_dir: where to write tests.log. Defaults to out/<name>/, never the module
+            itself, so the log cannot end up in a commit.
 
     Returns:
         Whether the tests passed, with the failing lines when they did not.
@@ -65,7 +71,7 @@ def run_module_tests(name: str, run_dir: str | None = None) -> str:
         COMPOSE + ["run", "--rm", "odoo", "odoo", "-d", s.odoo_db, "-i", name,
                    "--test-tags", f"/{name}", "--stop-after-init"]
     )
-    log_dir = Path(run_dir) if run_dir else (Path.cwd() / s.addons_dir / name)
+    log_dir = Path(run_dir) if run_dir else (REPO_ROOT / "out" / name)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "tests.log"
     log_path.write_text(output, encoding="utf-8")
@@ -99,9 +105,11 @@ def replay_workflow(recording_path: str, run_dir: str, module: str | None = None
         if installed.startswith(("install failed", "module installed but")):
             return f"did not replay: {installed}"
 
+    # The same interpreter and package that are running now, not whatever
+    # `odoo-miner` happens to be first on PATH.
     code, output = _run(
-        ["odoo-miner", "run", recording_path, "-d", run_dir,
-         "--pre-hook", "./scripts/restore_db.sh", "--screenshots"],
+        [sys.executable, "-m", "odoo_miner.cli", "run", recording_path, "-d", run_dir,
+         "--pre-hook", RESTORE_HOOK, "--screenshots"],
         timeout=DEFAULT_TIMEOUT,
     )
     session = Path(run_dir) / "session.json"

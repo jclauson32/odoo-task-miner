@@ -551,3 +551,67 @@ def test_an_outward_action_waits_for_a_person(approved):
     [entry] = audit.read()
     assert entry["action"] == "approve_git_push_feature_branch"
     assert entry["outcome"] == ("approved" if approved else "rejected")
+
+
+# ----------------------------------------------------------------- the builder's bound tools
+
+
+@pytest.fixture
+def bound(tmp_path):
+    from odoo_miner.agents.builder import bound_tools
+
+    run_dir, module_dir = tmp_path / "run", tmp_path / "addons" / "demo_mod"
+    run_dir.mkdir()
+    module_dir.mkdir(parents=True)
+    tools = {tool.__name__: tool for tool in bound_tools(run_dir, module_dir, "demo_mod")}
+    return tools, run_dir, module_dir
+
+
+def test_every_gate_names_a_tool_the_builder_really_has(bound):
+    """interrupt_on matches by name; a renamed tool would silently lose its gate."""
+    tools, _, _ = bound
+    assert set(GATED_TOOLS) <= set(tools)
+
+
+def test_virtual_paths_resolve_inside_the_run_and_module(tmp_path):
+    from odoo_miner.agents.builder import path_resolver
+
+    run_dir, module_dir = tmp_path / "run", tmp_path / "addons" / "demo_mod"
+    resolve = path_resolver(run_dir, module_dir, "demo_mod")
+    assert resolve("/run/plan.md") == str((run_dir / "plan.md").resolve())
+    assert resolve("/run/after/screenshots/step-012.png") == str(
+        (run_dir / "after/screenshots/step-012.png").resolve()
+    )
+    assert resolve("/addons/demo_mod/__manifest__.py") == str(
+        (module_dir / "__manifest__.py").resolve()
+    )
+    assert resolve("/run") == str(run_dir.resolve())
+    with pytest.raises(ValueError, match="outside"):
+        resolve("/run/../../etc/passwd")
+
+
+def test_the_builder_can_only_deliver_the_approved_module(bound, monkeypatch):
+    tools, _, _ = bound
+    called = []
+    monkeypatch.setattr(delivery, "git_push_feature_branch", lambda *a, **k: called.append(a) or "pushed")
+    monkeypatch.setattr(delivery, "open_pull_request", lambda *a, **k: called.append(a) or "opened")
+
+    assert "approved plan is for 'demo_mod'" in tools["git_push_feature_branch"]("other_mod", "t")
+    assert "approved plan is for 'demo_mod'" in tools["open_pull_request"]("other_mod", "t", "b")
+    assert called == []
+    assert tools["git_push_feature_branch"]("demo_mod", "Add demo") == "pushed"
+
+
+def test_email_attachments_are_translated_from_virtual_paths(bound, monkeypatch):
+    tools, run_dir, _ = bound
+    sent = {}
+    monkeypatch.setattr(
+        delivery, "send_report_email",
+        lambda subject, body, files: sent.update(files=files) or "sent",
+    )
+    tools["send_report_email"]("s", "b", ["/run/plan.md", "/run/after/screenshots/step-001.png"])
+    assert sent["files"] == [
+        str((run_dir / "plan.md").resolve()),
+        str((run_dir / "after/screenshots/step-001.png").resolve()),
+    ]
+    assert "outside" in tools["send_report_email"]("s", "b", ["/run/../../../etc/passwd"])

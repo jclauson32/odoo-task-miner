@@ -445,5 +445,27 @@ def analyze(
     for problem in result.get("errors") or []:
         err.print(f"[yellow]{escape(problem)}[/yellow]")
 
+@app.command()
+def doctor():
+    """Check this machine is ready: keys, Odoo, databases, source, replay, email, GitHub."""
+    from .doctor import run_checks
+
+    marks = {"ok": "[green]✓[/green]", "warn": "[yellow]![/yellow]", "fail": "[red]✗[/red]"}
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column(width=1)
+    table.add_column(style="bold")
+    table.add_column(overflow="fold")
+    results = run_checks()
+    for check in results:
+        detail = escape(check.detail) + (f"\n[dim]→ {escape(check.fix)}[/dim]" if check.fix and check.status != "ok" else "")
+        table.add_row(marks[check.status], check.name, detail)
+    console.print(table)
+    failed = [check for check in results if check.status == "fail"]
+    if failed:
+        err.print(f"\n[red]{len(failed)} check(s) failed.[/red]")
+        raise typer.Exit(code=1)
+    console.print("\n[green]Ready.[/green]")
+
+
 if __name__ == "__main__":
     app()

@@ -58,7 +58,7 @@ read-only columns on the bill lines:
 | Workflow replayed with the module installed | both bills posted with the same corrected values |
 | Steps / effort, scored the same way before and after | 20 → 14 steps, 34 → 22 effort (**−35%**) |
 | Review | the first push was rejected (the columns leaked onto customer invoices); the builder fixed it, reran its tests, and asked again |
-| Delivery | branch `feat/purchase_bill_match_columns`, [pull request #1](https://github.com/jclauson32/odoo-task-miner/pull/1), report email with before/after screenshots - each approved by a person, each in `out/audit.jsonl` |
+| Delivery | branch `feat/purchase_bill_match_columns`, [pull request #1](https://github.com/jclauson32/odoo-task-miner/pull/1), report email with before/after screenshots - each approved at its gate, each in `out/audit.jsonl` |
 
 ## When a written rule decides the answer
 

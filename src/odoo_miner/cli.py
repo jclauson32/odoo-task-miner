@@ -666,6 +666,7 @@ _ARTIFACT_VIEWS = [
 def audit(
     run_name: str | None = typer.Option(None, "--run", help="Only this run's entries."),
     last: int = typer.Option(20, "--last", help="How many of the most recent entries to show."),
+    full: bool = typer.Option(False, "--full", help="Show notes whole instead of their first 120 characters."),
 ):
     """Show the audit log: who approved or rejected what, and what was sent out."""
     from .agents.audit import audit_path, read
@@ -685,7 +686,7 @@ def audit(
         table.add_row(
             entry.get("at", "")[:19].replace("T", " "), entry.get("run", ""),
             entry.get("action", "").replace("approve_", "approve "),
-            f"[{color}]{escape(outcome)}[/{color}]", escape(str(detail)[:120]),
+            f"[{color}]{escape(outcome)}[/{color}]", escape(str(detail) if full else str(detail)[:120]),
         )
     console.print(table)
 

@@ -62,12 +62,12 @@ read-only columns on the bill lines:
 
 ## When a written rule decides the answer
 
-`recordings/bill-exception-resolution.json` is an AP clerk clearing all four
-seeded exceptions: a price variance, a partial receipt, rejected goods, and a
-freight charge on no PO. For each bill they open the PO and its receipts,
-come back, type a note quoting the numbers, correct the line and confirm - 47
-steps, and the four notes they type are the company's payables policy,
-applied by hand.
+`recordings/bill-exception-resolution.json` is a scripted AP clerk clearing
+all four seeded exceptions: a price variance, a partial receipt, rejected
+goods, and a freight charge on no PO. For each bill they open the PO and its
+receipts, come back, type a note quoting the numbers, correct the line and
+confirm - 47 steps, and the four notes they type are the company's payables
+policy, applied by hand.
 
 The planner first proposed showing the PO's numbers on the bill. A reviewer
 sent the plan back with the policy - *record a bill at PO terms, remove a
@@ -185,7 +185,7 @@ step, what to expect, and what to do when something fails.
 | `odoo-miner analyze DIR [--until STAGE]` | The stages as one resumable pipeline. |
 | `odoo-miner analyze DIR --approve` / `--reject` [`--notes "…"`] | Answer whichever approval the pipeline is waiting on. At the plan, `--reject --notes` sends it back to be revised and `--approve --notes` gives the builder conditions. |
 | `odoo-miner report DIR` | Email the plan and screenshots of where the user got stuck to `REPORT_EMAIL_TO`, after you confirm. |
-| `odoo-miner audit [--run NAME]` | The audit log as a table: who approved or rejected what, and what was sent out. |
+| `odoo-miner audit [--run NAME] [--full]` | The audit log as a table: who approved or rejected what, and what was sent out; `--full` shows the notes whole. |
 
 ## Setup details
 

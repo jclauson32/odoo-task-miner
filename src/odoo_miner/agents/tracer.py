@@ -170,6 +170,20 @@ def render_segment(segment, clicks: list[SessionClick], refs: list[CodeRef], que
     return "\n".join(lines)
 
 
+def tracer_middleware() -> list:
+    """Prompt caching for the tracer's tool loop.
+
+    Each segment is a loop that re-sends the whole conversation, source it has
+    read included, on every turn; without caching that input is billed in
+    full each time. The single-shot stages (segmenter, assessor) do not get
+    this: their prompts are under the minimum cacheable length, and a cache
+    write that is never read costs 25% more than no cache at all.
+    """
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    return [AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore")]
+
+
 def build_tracer(model: str | None = None):
     """The LangChain agent, with the source-search tools."""
     from langchain.agents import create_agent
@@ -178,6 +192,7 @@ def build_tracer(model: str | None = None):
         model=model or model_for("tracer"),
         tools=odoo_source.TOOLS,
         system_prompt=load_prompt("tracer"),
+        middleware=tracer_middleware(),
         response_format=TracedSegmentDraft,
         name="tracer_agent",
     )

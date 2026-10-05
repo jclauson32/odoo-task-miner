@@ -203,6 +203,18 @@ def test_tracer_drops_invented_coderefs(session, gold):
     assert all(ref.file != "addons/nope/no_such_file.py" for ref in traced.actions)
 
 
+def test_tracer_caches_its_tool_loop():
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+
+    assert any(isinstance(m, AnthropicPromptCachingMiddleware) for m in tracer.tracer_middleware())
+
+
+def test_tests_do_not_send_traces():
+    import os
+
+    assert os.environ["LANGSMITH_TRACING"] == "false"
+
+
 def test_tracer_retrievals_come_from_code_not_the_model(session, gold):
     """The model is never asked for retrievals, so it cannot invent them."""
     assert "retrievals" not in TracedSegmentDraft.model_fields

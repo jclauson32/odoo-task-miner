@@ -208,8 +208,12 @@ def show(
     first: int | None = typer.Option(None, "--from", help="First step number to show."),
     last: int | None = typer.Option(None, "--to", help="Last step number to show."),
 ):
-    """Print a click log or session as a table, numbered by recording step."""
+    """Print any pipeline file as a table: clicks, session, segments, traces, assessment or plan."""
     data = json.loads(path.read_text(encoding="utf-8"))
+    for looks_like, render in _ARTIFACT_VIEWS:
+        if looks_like(data):
+            render(data, path)
+            return
     is_session = "unattributed_calls" in data
     log = Session.model_validate(data) if is_session else ClickLog.model_validate(data)
     clicks = [
@@ -523,6 +527,79 @@ def report(
         console.print(f"[green]✓[/green] {escape(result)}")
     else:
         _fail(result)
+
+
+# ---------------------------------------------------------------- show: agent artifacts
+
+
+def _show_segments(data: dict, path: Path) -> None:
+    table = Table(title=f"Segments - {data.get('session') or path}")
+    for column, justify in [("Segment", "left"), ("Steps", "right"), ("Outcome", "left"), ("What the user did", "left")]:
+        table.add_column(column, justify=justify)
+    for seg in data["segments"]:
+        steps = seg["step_indexes"]
+        outcome = seg.get("outcome", "completed")
+        color = {"failed": "red", "recovered": "yellow", "abandoned": "red"}.get(outcome, "green")
+        span = f"{steps[0]}-{steps[-1]}" if steps else "-"
+        table.add_row(seg["segment_id"], span, f"[{color}]{outcome}[/{color}]", escape(seg["label"]))
+    console.print(table)
+
+
+def _show_traces(data: dict, path: Path) -> None:
+    for seg in data["segments"]:
+        console.print(f"[bold]{seg['segment_id']}[/bold] [dim]{seg['kind']}[/dim]")
+        for ref in seg.get("actions", []):
+            console.print(f"  [cyan]{escape(ref['symbol'])}[/cyan]  {escape(ref['file'])}:{ref['line']}")
+        if seg.get("explanation"):
+            console.print(f"  {escape(seg['explanation'])}", soft_wrap=True)
+        console.print()
+
+
+def _show_assessment(data: dict, path: Path) -> None:
+    table = Table(title=f"Effort by segment - total {data.get('total_effort', 0):g}")
+    table.add_column("Segment")
+    table.add_column("Effort", justify="right")
+    table.add_column("Hardest step", justify="right")
+    table.add_column("Friction")
+    for seg in data["segments"]:
+        hardest = max(seg.get("steps", []), key=lambda s: s["score"], default=None)
+        table.add_row(
+            seg["segment_id"], f"{seg['effort']:g}",
+            f"{hardest['step_index']} ({hardest['score']})" if hardest else "-",
+            escape("; ".join(seg.get("friction", []))),
+        )
+    console.print(table)
+
+
+def _show_plan(data: dict, path: Path) -> None:
+    console.print(f"[bold]Decision:[/bold] {escape(data['decision'].replace('_', ' '))}")
+    if data.get("module_name"):
+        console.print(f"[bold]Module:[/bold] {escape(data['module_name'])}")
+    console.print(f"\n{escape(data['summary'])}\n", soft_wrap=True)
+    for key, title in [("acceptance_criteria", "Acceptance criteria"), ("risks", "Risks")]:
+        if data.get(key):
+            console.print(f"[bold]{title}[/bold]")
+            for item in data[key]:
+                console.print(f"  - {escape(item)}", soft_wrap=True)
+    _show_citation_check(data.get("unverified_citations") or [])
+
+
+def _is_segments(data: dict) -> bool:
+    first = (data.get("segments") or [{}])[0]
+    return "step_indexes" in first
+
+
+def _is_traces(data: dict) -> bool:
+    first = (data.get("segments") or [{}])[0]
+    return "kind" in first and "actions" in first
+
+
+_ARTIFACT_VIEWS = [
+    (lambda d: "decision" in d and "summary" in d, _show_plan),
+    (lambda d: "total_effort" in d, _show_assessment),
+    (_is_traces, _show_traces),
+    (_is_segments, _show_segments),
+]
 
 
 if __name__ == "__main__":

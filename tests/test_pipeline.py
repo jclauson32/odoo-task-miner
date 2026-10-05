@@ -226,3 +226,53 @@ def test_show_does_not_eat_brackets(tmp_path):
     runner.invoke(app, ["ingest", str(REAL), "-o", str(out)])
     r = runner.invoke(app, ["show", str(out)], env={"COLUMNS": "200"})
     assert "[FRT-EXP] Expedite freight" in r.output
+
+
+# --- show: agent artifacts ---------------------------------------------------
+
+GOLD_SEGMENTS = Path(__file__).resolve().parents[1] / "evals" / "datasets" / "rfq_to_payment.segments.json"
+
+
+def _show(path, columns="200"):
+    return runner.invoke(app, ["show", str(path)], env={"COLUMNS": columns})
+
+
+def test_show_renders_segments():
+    r = _show(GOLD_SEGMENTS)
+    assert r.exit_code == 0, r.output
+    assert "Confirm the bill and hit the missing bill date error" in r.output
+    assert "failed" in r.output and "recovered" in r.output
+
+
+def test_show_renders_traces(tmp_path):
+    traces = tmp_path / "traces.json"
+    traces.write_text(json.dumps({"session": "s", "segments": [{
+        "segment_id": "s07", "kind": "action", "retrievals": [],
+        "actions": [{"module": "purchase", "file": "addons/purchase/models/purchase_order.py",
+                     "line": 538, "symbol": "PurchaseOrder.button_confirm"}],
+        "explanation": "Confirming the RFQ turns it into a purchase order.",
+    }]}))
+    r = _show(traces)
+    assert r.exit_code == 0, r.output
+    assert "PurchaseOrder.button_confirm" in r.output and "purchase_order.py:538" in r.output
+
+
+def test_show_renders_assessment_and_plan(tmp_path):
+    assessment = tmp_path / "assessment.json"
+    assessment.write_text(json.dumps({"session": "s", "total_effort": 5, "segments": [{
+        "segment_id": "s10", "effort": 5, "friction": ["error: bill date required"],
+        "steps": [{"step_index": 50, "score": 4, "signals": {"error": 1.0}}],
+    }]}))
+    r = _show(assessment)
+    assert r.exit_code == 0 and "bill date required" in r.output and "50 (4)" in r.output
+
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({
+        "decision": "no_change", "summary": "The bill date is a deliberate control.",
+        "risks": ["Defaulting it would weaken an audit control."],
+        "unverified_citations": ["`x` is cited in a.py but does not appear there."],
+    }))
+    r = _show(plan)
+    assert r.exit_code == 0
+    assert "no change" in r.output and "deliberate control" in r.output
+    assert "check by hand" in r.output

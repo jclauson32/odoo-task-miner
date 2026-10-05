@@ -7,6 +7,13 @@ cd "$(dirname "$0")/.."
 DB="${DB:-demo}"
 SNAP="${SNAP:-${DB}_snapshot}"
 
+# Odoo is stopped while the database is swapped; if anything below fails,
+# start it again rather than leave the demo down.
+trap 'docker compose start odoo >/dev/null 2>&1 || true' ERR
+
+# Works straight after a Docker restart, when the database container is down.
+docker compose up -d --wait db
+
 docker compose stop odoo
 docker compose exec -T db dropdb -U odoo --if-exists --force "$SNAP"
 docker compose exec -T db createdb -U odoo -T "$DB" "$SNAP"

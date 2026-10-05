@@ -14,6 +14,11 @@ signals and citation checks are code; naming tasks, explaining code and
 weighing a change are the model's job. Every model output is validated, and
 nothing leaves the machine without a person approving it.
 
+**Latest:** an accounts-payable workflow cut from 47 steps to 24 by a one-click
+module the pipeline built and tested - see [When a written rule decides the
+answer](#when-a-written-rule-decides-the-answer) and
+[pull request #2](https://github.com/jclauson32/odoo-task-miner/pull/2).
+
 New here? [`docs/RUNBOOK.md`](docs/RUNBOOK.md) walks through the reference
 scenario end to end. Working on the agents? Start with [`AGENTS.md`](AGENTS.md),
 then [`docs/AGENT_BUILD_GUIDE.md`](docs/AGENT_BUILD_GUIDE.md).

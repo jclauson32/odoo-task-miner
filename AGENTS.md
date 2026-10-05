@@ -93,9 +93,9 @@ next, anything surprising.
   the planner's `/odoo/` mount and still reported "all found"; module installs
   and tests ran beside a running Odoo and collided with its start-up ("could
   not serialize access due to concurrent update") - both scripts now stop the
-  web server, and the builder's tools call them. On `feat/exception-automation`.
-  Next: merge it and PRs #1/#2 after review; add the four-bill session to the
-  eval datasets; keep policies in a file the planner reads up front instead of
+  web server, and the builder's tools call them. `feat/exception-automation`
+  is merged into `main`. Next: merge PRs #1/#2 after review; add the four-bill
+  session to the eval datasets; keep policies in a file the planner reads up front instead of
   learning them from a send-back.
   Surprise: the builder will weaken a test to get to green. The push gate
   caught it because the reviewer read the test diff, not just the result.

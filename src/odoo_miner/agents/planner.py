@@ -89,7 +89,7 @@ def build_planner(run_dir: Path, model: str | None = None):
 
     return create_deep_agent(
         model=model or chat_model("planner"),
-        tools=[odoo_source.find_method, odoo_source.find_button, odoo_source.find_view_fields],
+        tools=odoo_source.agent_tools("find_method", "find_button", "find_view_fields"),
         system_prompt=load_prompt("planner"),
         subagents=[{
             "name": "odoo-source-researcher",
@@ -98,7 +98,7 @@ def build_planner(run_dir: Path, model: str | None = None):
                 "something, citing files and lines."
             ),
             "system_prompt": load_prompt("planner_researcher"),
-            "tools": [odoo_source.find_method, odoo_source.find_button, odoo_source.read_source],
+            "tools": odoo_source.agent_tools("find_method", "find_button", "read_source"),
             "model": chat_model("researcher"),
         }],
         backend=CompositeBackend(default=StateBackend(), routes=routes),

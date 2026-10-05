@@ -251,18 +251,25 @@ def _resolve_readable(file: str) -> Path:
     # "addons/purchase/..." may be relative to the Odoo root or to the project.
     candidates += [Path.cwd() / raw]
 
+    missing_inside = False
     for candidate in candidates:
         try:
             resolved = candidate.resolve()
         except OSError:
             continue
-        if not resolved.is_file():
+        if not any(resolved == root or root in resolved.parents for root in roots):
             continue
-        if any(resolved == root or root in resolved.parents for root in roots):
+        if resolved.is_file():
             return resolved
+        missing_inside = True
 
+    if missing_inside:
+        raise FileNotFoundError(
+            f"No such file: {file}. Paths are relative to the Odoo source root, e.g. "
+            "addons/purchase/models/purchase_order.py; find_method and find_button return exact paths."
+        )
     raise PermissionError(
-        f"{file} is not readable: it must be inside the Odoo source checkout or addons/."
+        f"{file} is outside the Odoo source checkout and addons/; refusing to read it."
     )
 
 
@@ -445,6 +452,22 @@ def find_view_pages(model: str) -> list[str]:
     return sorted(pages)
 
 
-# Functions handed to agents. create_agent accepts plain callables; the
-# docstrings above are the tool descriptions the model reads.
-TOOLS = [find_method, find_button, read_source, find_view_fields, find_view_pages]
+_ALL = (find_method, find_button, read_source, find_view_fields, find_view_pages)
+
+
+def agent_tools(*names: str) -> list:
+    """These functions as agent tools: errors come back as text instead of ending the run.
+
+    create_agent accepts plain callables; the docstrings above are the tool
+    descriptions the model reads. With no names, all of them.
+    """
+    from .errors import reports_errors
+
+    chosen = [fn for fn in _ALL if not names or fn.__name__ in names]
+    unknown = set(names) - {fn.__name__ for fn in chosen}
+    if unknown:
+        raise ValueError(f"Unknown tools: {sorted(unknown)}")
+    return [reports_errors(fn) for fn in chosen]
+
+
+TOOLS = agent_tools()

@@ -19,6 +19,7 @@ from typing import Any
 from .config import chat_model, load_prompt, settings, trace_config
 from .contracts import BuildResult, Plan
 from .tools import delivery, odoo_ops, odoo_source
+from .tools.errors import reports_errors
 
 # Every tool that sends work out of the machine pauses for a person first.
 GATED_TOOLS = ("git_push_feature_branch", "open_pull_request", "send_report_email")
@@ -152,7 +153,10 @@ def build_builder(run_dir: Path, plan: Plan, model: Any = None):
 
     return create_deep_agent(
         model=model or chat_model("builder"),
-        tools=[odoo_source.read_source, *bound_tools(Path(run_dir), module_dir, plan.module_name)],
+        tools=[
+            *odoo_source.agent_tools("read_source"),
+            *(reports_errors(tool) for tool in bound_tools(Path(run_dir), module_dir, plan.module_name)),
+        ],
         system_prompt=load_prompt("builder"),
         backend=CompositeBackend(default=StateBackend(), routes=routes),
         permissions=[

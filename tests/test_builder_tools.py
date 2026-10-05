@@ -115,3 +115,51 @@ def test_effort_is_compared_the_same_way_on_both_sides(tmp_path):
         shutil.copy(GOLD, folder / "segments.json")
     result = odoo_ops.measure_effort(str(tmp_path / "after"), before_dir=str(tmp_path / "before"))
     assert "+0%" in result and "54 steps" in result
+
+
+# ----------------------------------------------------------------- tool errors
+
+
+def test_a_failing_tool_reports_the_error_instead_of_ending_the_run():
+    from odoo_miner.agents.tools.errors import reports_errors
+
+    def read_thing(path: str) -> str:
+        """Read a thing."""
+        raise FileNotFoundError(f"No such file: {path}")
+
+    wrapped = reports_errors(read_thing)
+    assert wrapped("x.py") == "error: read_thing failed - FileNotFoundError: No such file: x.py"
+
+
+def test_an_approval_pause_is_never_swallowed():
+    """GraphInterrupt subclasses Exception; catching it would remove a human gate."""
+    from langgraph.errors import GraphInterrupt
+
+    from odoo_miner.agents.tools.errors import reports_errors
+
+    def gated() -> str:
+        raise GraphInterrupt(())
+
+    with pytest.raises(GraphInterrupt):
+        reports_errors(gated)()
+
+
+def test_wrapped_tools_keep_the_schema_the_model_sees():
+    import inspect
+
+    from langchain_core.tools import tool as as_tool
+
+    from odoo_miner.agents.tools import odoo_source
+
+    for wrapped in odoo_source.agent_tools():
+        original = getattr(odoo_source, wrapped.__name__)
+        assert inspect.signature(wrapped) == inspect.signature(original)
+        assert as_tool(wrapped).args == as_tool(original).args
+        assert wrapped.__doc__ == original.__doc__
+
+
+def test_unknown_tool_names_are_refused():
+    from odoo_miner.agents.tools import odoo_source
+
+    with pytest.raises(ValueError, match="Unknown tools"):
+        odoo_source.agent_tools("find_method", "no_such_tool")

@@ -266,6 +266,11 @@ class TestOdooSource:
             with pytest.raises((PermissionError, ValueError)):
                 odoo_source.read_source(bad, 1, 2)
 
+    def test_a_missing_file_inside_the_source_says_so(self):
+        """It used to claim the path was outside the source, which sent the model the wrong way."""
+        with pytest.raises(FileNotFoundError, match="No such file"):
+            odoo_source.read_source("addons/purchase/wizard/purchase_order_line_invoice.py", 1, 5)
+
     def test_read_source_is_bounded(self):
         text = odoo_source.read_source("addons/purchase/models/purchase_order.py", 1, 10_000)
         assert len(text.splitlines()) <= odoo_source.MAX_READ_LINES

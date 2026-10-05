@@ -424,7 +424,9 @@ def analyze(
     approve: bool | None = typer.Option(
         None, "--approve/--reject", help="Answer a pending approval and continue."
     ),
-    notes: str = typer.Option("", "--notes", help="Notes to record with the approval."),
+    notes: str = typer.Option(
+        "", "--notes", help="Notes for the record. With --reject, notes send the plan or action back to be revised."
+    ),
     restart: bool = typer.Option(
         False, "--restart", help="Start over instead of resuming an unfinished run on this thread."
     ),
@@ -489,10 +491,11 @@ def analyze(
         # Answer with the same --until the run used, so approving a plan that
         # proposes a module does not start a builder this run left out.
         scope = f"--until {until} " if until else ""
+        base = f"odoo-miner analyze {run_dir} {scope}--thread {thread_id}"
         console.print(
-            f"\nApprove with:  odoo-miner analyze {run_dir} {scope}--approve "
-            f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} {scope}--reject "
-            f"--thread {thread_id} --notes \"why\""
+            f"\nApprove:    {base} --approve"
+            f"\nSend back:  {base} --reject --notes \"what to change\"   (revised, then asks again)"
+            f"\nReject:     {base} --reject   (ends here)"
         )
         return
 
@@ -651,7 +654,7 @@ def audit(
     table = Table(title=f"Audit log - {audit_path()}")
     for column in ("When (UTC)", "Run", "Action", "Outcome", "Detail"):
         table.add_column(column, overflow="fold")
-    colors = {"approved": "green", "ok": "green", "rejected": "yellow", "refused": "red"}
+    colors = {"approved": "green", "ok": "green", "sent back": "yellow", "rejected": "yellow", "refused": "red"}
     for entry in entries:
         outcome = entry.get("outcome", "")
         color = colors.get(outcome, "white")

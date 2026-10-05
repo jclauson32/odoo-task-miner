@@ -204,9 +204,22 @@ The builder wants to send something out. Approve each action:
 Answer each with `--approve` or `--reject --notes "…"` on the same thread.
 Every answer and every action goes into `out/audit.jsonl`.
 
-The builder is written and its safeguards are tested, but it has not yet
-been run end to end: the reference recording's plan was `no_change`, so there
-was nothing to build.
+To see a build end to end, run the scenario where a module is worth it:
+
+```bash
+odoo-miner run recordings/bill-exception-review.json -d out/bills \
+  --pre-hook ./scripts/restore_db.sh --screenshots
+odoo-miner analyze out/bills          # stops at the plan; expect decision: customize
+odoo-miner analyze out/bills --approve --notes "…"   # builds, then stops before the push
+```
+
+Then answer the push, pull request and email gates in turn. Before approving
+a push, read the module in `addons/<module>/`, `out/bills/tests.log` and
+`out/bills/after/` - that review is the point of the gate. Rejecting with
+notes sends the builder back to fix what you asked; it reruns its tests and
+asks once more. On the run in the README: 3 of 3 tests passing, effort 34 →
+22, and one rejected push (the columns showed on customer invoices) fixed
+on the second attempt.
 
 ## Cost
 

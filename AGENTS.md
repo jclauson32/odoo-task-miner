@@ -54,8 +54,8 @@ Update this table and the log below whenever you stop working.
 | M4 | assessor_agent | **done** - deterministic scores stable; bill error and dialog flagged |
 | M5 | LangGraph pipeline | **done** - one command, one trace; resumes after a crash |
 | M6 | planner_agent + approval | **done** - valid plan, readable plan.md, citations checked, graph pauses |
-| M7 | builder_agent | **code done, not run end to end** - safeguards tested with fakes; the reference plan was `no_change`, so nothing to build |
-| M8 | Demo polish | **mostly done** - `doctor`, `report`, runbook, Studio via `langgraph dev`; no recorded backup yet |
+| M7 | builder_agent | **done** - first end-to-end run on `recordings/bill-exception-review.json`: module installed, 3/3 tests, after-replay effort 34 → 22, branch + PR #1 + email, each gate approved; one push rejected and fixed |
+| M8 | Demo polish | **mostly done** - `doctor`, `report`, runbook, Studio via `langgraph dev`, traces from a fresh terminal; no recorded backup video yet |
 
 ## What needs an API key
 
@@ -76,6 +76,24 @@ python evals/run_evals.py check
 Newest first. One entry per working session: date, who, what changed, what's
 next, anything surprising.
 
+- 2026-10-05 (morning): First end-to-end build. Recorded (from the live UI)
+  `recordings/bill-exception-review.json`: a buyer resolving two three-way-match
+  exceptions by hopping to the PO and receipts. The planner chose `customize`
+  (`purchase_bill_match_columns`: PO qty / received qty / PO price on bill
+  lines); the builder wrote it, installed it, passed 3/3 tests, replayed the
+  workflow without the hops (20 → 14 steps, effort 34 → 22), and delivered
+  branch, PR #1 and email through the gates. The first push was rejected - the
+  columns leaked onto customer invoices - and the builder fixed it and asked again.
+  Fixed on the way: replay restored the DB *after* installing the module (the
+  after-run never had it); the builder could not see the recording; module
+  tests could "pass" with none run; before/after effort was scored differently;
+  `action_view_*` smart buttons counted as writes; a tool exception ended the
+  whole run (tools now report errors to the model, but never swallow an
+  approval pause); the builder could not resubmit after fixing review notes;
+  runs from a fresh terminal were never traced (.env loaded too late); email
+  attachments with the same name. All on `feat/production-hardening`.
+  Next: merge the branch and PR #1; record more scenarios from the seed
+  (rejected goods, extra charges) and add them to the eval datasets.
 - 2026-10-05: Ran every LLM stage for the first time and fixed what that
   exposed; hardened delivery; production pass over the repo. On branch
   `feat/production-hardening`.

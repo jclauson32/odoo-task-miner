@@ -37,6 +37,28 @@ with prompt caching (82% of its input served from cache). The planner decides
 how much of Odoo's source to read, so its cost varies most: 11 model calls in
 one run, 69 in another. A whole analysis has cost between $0.66 and about $7.
 
+## When a change is worth building
+
+`recordings/bill-exception-review.json` is a buyer resolving two seeded
+three-way-match exceptions: a bill priced above its purchase order (4.35
+against 4.10) and a bill for 1,000 units when 600 were received. For each,
+they open the purchase order and its receipts just to read numbers, come
+back, correct the line and post.
+
+The planner chose to **customize** - nothing in Odoo Community shows the PO's
+quantity, received quantity or price on a bill line (the "Purchase Matching"
+button hides once a line is matched; 3-way matching is an Enterprise
+upgrade) - and the builder delivered `purchase_bill_match_columns`, three
+read-only columns on the bill lines:
+
+| Check | Result |
+|---|---|
+| Module tests (Odoo's own result line) | 3 of 3 pass |
+| Workflow replayed with the module installed | both bills posted with the same corrected values |
+| Steps / effort, scored the same way before and after | 20 → 14 steps, 34 → 22 effort (**−35%**) |
+| Review | the first push was rejected (the columns leaked onto customer invoices); the builder fixed it, reran its tests, and asked again |
+| Delivery | branch `feat/purchase_bill_match_columns`, [pull request #1](https://github.com/jclauson32/odoo-task-miner/pull/1), report email with before/after screenshots - each approved by a person, each in `out/audit.jsonl` |
+
 ## How it works
 
 ```
@@ -79,7 +101,7 @@ a node in the same graph.
 - **Everything is on the record.** Approvals and outward actions are appended
   to `out/audit.jsonl` (who, when, what, outcome); every model call is traced
   in LangSmith with the run and stage.
-- **Tests need nothing.** 153 tests run with no API key, no Odoo and no
+- **Tests need nothing.** 159 tests run with no API key, no Odoo and no
   network; they cannot send mail, push, or emit traces. CI runs them and ruff
   on every push.
 
@@ -217,7 +239,7 @@ only, with no backend calls.
 ## Development
 
 ```bash
-uv run pytest                        # 153 tests, no API key or Odoo needed
+uv run pytest                        # 159 tests, no API key or Odoo needed
 uv run ruff check src tests evals scripts
 uv run python evals/run_evals.py check   # evaluators against the gold labels, offline
 uv run langgraph dev                 # the pipeline in LangGraph Studio

@@ -304,3 +304,16 @@ def test_ordinary_fields_are_not_redacted():
 
     log = parse_recording({"steps": [{"type": "change", "value": "12.50", "selectors": [["aria/Sales Price"]]}]})
     assert log.clicks[0].value == "12.50"
+
+
+def test_smart_buttons_that_open_records_are_navigation_not_writes():
+    from odoo_miner.merge import classify
+    from odoo_miner.models import NetworkCall
+
+    def call(method, endpoint="/web/dataset/call_button/purchase.order/" + "x"):
+        return NetworkCall(step_index=1, timestamp_ms=0, endpoint=endpoint, model="purchase.order", method=method)
+
+    assert classify(call("action_view_picking")) == "action_load"
+    assert classify(call("action_view_source_purchase_orders")) == "action_load"
+    assert classify(call("action_post")) == "write"            # a real write through the same endpoint
+    assert classify(call("button_confirm")) == "write"

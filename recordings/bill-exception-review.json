@@ -1,0 +1,290 @@
+{
+    "title": "bill-exception-review",
+    "steps": [
+        {
+            "type": "setViewport",
+            "width": 1365,
+            "height": 919,
+            "deviceScaleFactor": 1,
+            "isMobile": false,
+            "hasTouch": false,
+            "isLandscape": false
+        },
+        {
+            "type": "navigate",
+            "url": "http://localhost:8069/web/login?redirect=%2Fodoo%2Fbills",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "http://localhost:8069/web/login?redirect=%2Fodoo%2Fbills",
+                    "title": "Odoo"
+                }
+            ]
+        },
+        {
+            "type": "change",
+            "value": "admin",
+            "selectors": [
+                [
+                    "aria/Email"
+                ],
+                [
+                    "#login"
+                ],
+                [
+                    "xpath///*[@id=\"login\"]"
+                ],
+                [
+                    "pierce/#login"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "change",
+            "value": "admin",
+            "selectors": [
+                [
+                    "aria/Password Reset Password"
+                ],
+                [
+                    "#password"
+                ],
+                [
+                    "xpath///*[@id=\"password\"]"
+                ],
+                [
+                    "pierce/#password"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "Enter",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "http://localhost:8069/odoo/bills",
+                    "title": "Odoo"
+                }
+            ]
+        },
+        {
+            "type": "keyUp",
+            "target": "main",
+            "key": "Enter"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "text/MF-88213"
+                ],
+                [
+                    "xpath///td[@name=\"ref\" and normalize-space()=\"MF-88213\"]"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "button[name=action_view_source_purchase_orders]"
+                ],
+                [
+                    "text/P00004 Purchases"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "button[name=action_view_picking]"
+                ],
+                [
+                    "text/1 Receipt"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Draft Bill (MF-88213)\"]"
+                ],
+                [
+                    "text/Draft Bill (MF-88213)"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "td[name=price_unit]"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "change",
+            "value": "4.10",
+            "selectors": [
+                [
+                    "td[name=price_unit] input"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "button[name=action_post]"
+                ],
+                [
+                    "text/Confirm"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Bills\"]"
+                ],
+                [
+                    "text/Bills"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "text/PPC-INV-1017"
+                ],
+                [
+                    "xpath///td[@name=\"ref\" and normalize-space()=\"PPC-INV-1017\"]"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "button[name=action_view_source_purchase_orders]"
+                ],
+                [
+                    "text/P00005 Purchases"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "button[name=action_view_picking]"
+                ],
+                [
+                    "text/2 Receipt"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Draft Bill (PPC-INV-1017)\"]"
+                ],
+                [
+                    "text/Draft Bill (PPC-INV-1017)"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "td[name=quantity]"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "change",
+            "value": "600",
+            "selectors": [
+                [
+                    "td[name=quantity] input"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "button[name=action_post]"
+                ],
+                [
+                    "text/Confirm"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Bills\"]"
+                ],
+                [
+                    "text/Bills"
+                ]
+            ],
+            "offsetX": 10,
+            "offsetY": 8
+        }
+    ]
+}

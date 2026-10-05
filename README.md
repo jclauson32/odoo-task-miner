@@ -79,7 +79,7 @@ a node in the same graph.
 - **Everything is on the record.** Approvals and outward actions are appended
   to `out/audit.jsonl` (who, when, what, outcome); every model call is traced
   in LangSmith with the run and stage.
-- **Tests need nothing.** 130 tests run with no API key, no Odoo and no
+- **Tests need nothing.** 153 tests run with no API key, no Odoo and no
   network; they cannot send mail, push, or emit traces. CI runs them and ruff
   on every push.
 
@@ -217,7 +217,7 @@ only, with no backend calls.
 ## Development
 
 ```bash
-uv run pytest                        # 130 tests, no API key or Odoo needed
+uv run pytest                        # 153 tests, no API key or Odoo needed
 uv run ruff check src tests evals scripts
 uv run python evals/run_evals.py check   # evaluators against the gold labels, offline
 uv run langgraph dev                 # the pipeline in LangGraph Studio

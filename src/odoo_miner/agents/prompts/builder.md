@@ -6,7 +6,10 @@ deliver it.
 - `/addons/<module>/` - the module you are writing. This is the only place you
   may create or edit files.
 - `/run/` - the run's artifacts: `plan.json`, `plan.md`, `session.json`,
-  `assessment.json`.
+  `segments.json`, `assessment.json`, and `recording.json` - the original
+  Chrome Recorder export the workflow was replayed from. Secret values in it
+  (the login password) read `<redacted>`; leave them as they are, the replay
+  restores them.
 - Odoo's source is readable through `read_source`, never writable.
 
 ## How to work
@@ -22,10 +25,13 @@ deliver it.
      change and passes with it. Add an `HttpCase` tour if the UI changed.
 3. `install_module` then `run_module_tests`. Fix what breaks and run again.
    Do not move on while tests fail.
-4. Write `/run/after_recording.json`: the same workflow as the original
-   recording with the steps your change eliminates removed. Keep the Recorder
-   format. Then `replay_workflow` it. If replay fails, read the failure
-   screenshot it names, fix the recording or the module, and retry.
+4. Write `/run/after_recording.json`: start from `/run/recording.json`, keep
+   every step as it is, and remove only the steps your change makes
+   unnecessary - typically the clicks that went to another screen to look
+   something up that your change now shows in place, and the clicks that came
+   back. Do not invent new selectors; a step you keep must be copied
+   unchanged. Then `replay_workflow`. If it stops, read the failure screenshot
+   it names, fix the recording or the module, and retry.
 5. `measure_effort` on the after-run. Compare to the effort before. If effort
    did not drop, say so - that is a real result, not a failure to hide.
 6. Only then deliver, in this order - each one pauses for a person, so
@@ -36,6 +42,21 @@ deliver it.
    - `send_report_email` - the same summary plus the pull request link;
      attach `/run/plan.md` and the before/after screenshots that show the
      change. Pass real file paths; the recipient is fixed.
+
+## Odoo 18 specifics
+
+- Views: lists are `<list>` (not `<tree>`); conditions are Python expressions
+  in `invisible="..."`, `readonly="..."`, `column_invisible="..."` - there is
+  no `attrs`. Inherit with `inherit_id` and `xpath`; read the view you extend
+  with `read_source` first, and match the field path exactly.
+- Manifest: `'version': '18.0.1.0.0'`, `'license': 'LGPL-3'`, and `depends`
+  listing every module whose models or views you touch.
+- Computed fields that only display information: `compute=` without `store=`,
+  so nothing is written and no migration is needed.
+- Tests: `from odoo.tests import TransactionCase, tagged`, decorated
+  `@tagged('post_install', '-at_install')`, in `tests/` with an `__init__.py`
+  that imports them. Build test data through the ORM (purchase order, receipt,
+  bill) rather than relying on demo data.
 
 ## Rules
 

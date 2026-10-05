@@ -6,6 +6,7 @@ Note the format records the order of steps but no timestamps.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -158,3 +159,43 @@ def load_recording(path: Path, keep_noise: bool = False) -> ClickLog:
     except json.JSONDecodeError as exc:
         raise RecordingError(f"{path} is not valid JSON: {exc}") from exc
     return parse_recording(data, source=str(path), keep_noise=keep_noise)
+
+
+def _first_selector(step: dict) -> str | None:
+    selectors = step.get("selectors") or []
+    return _flatten_selector(selectors[0]) if selectors else None
+
+
+def redact_recording(data: dict) -> dict:
+    """A copy of a recording with every value typed into a secret field replaced.
+
+    This is the copy an agent may read and edit; `rehydrate_secrets` puts the
+    real values back just before a replay.
+    """
+    out = copy.deepcopy(data)
+    for step in out.get("steps", []):
+        if step.get("value") is not None and is_secret_field(parse_target(step.get("selectors"))):
+            step["value"] = REDACTED
+    return out
+
+
+def rehydrate_secrets(recording: dict, original: dict) -> dict:
+    """Restore redacted values from the original recording, matched by the step's first selector.
+
+    Raises RecordingError when a redacted value has no counterpart, rather than
+    replaying a login with the literal text "<redacted>".
+    """
+    secrets = {
+        _first_selector(step): step["value"]
+        for step in original.get("steps", [])
+        if step.get("value") not in (None, REDACTED) and _first_selector(step)
+        and is_secret_field(parse_target(step.get("selectors")))
+    }
+    out = copy.deepcopy(recording)
+    for step in out.get("steps", []):
+        if step.get("value") == REDACTED:
+            key = _first_selector(step)
+            if key not in secrets:
+                raise RecordingError(f"No original value for the redacted field {key!r}.")
+            step["value"] = secrets[key]
+    return out

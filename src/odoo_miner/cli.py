@@ -63,6 +63,20 @@ def _do_ingest(recording: Path, out: Path, keep_noise: bool) -> ClickLog:
     return log
 
 
+def _keep_recording(recording: Path, out_dir: Path) -> None:
+    """Save the recording with the run, secrets redacted, and note where the original is.
+
+    The builder edits this copy into the after-recording; the replay restores
+    the redacted values from the original, so they never reach a model.
+    """
+    from .recorder import redact_recording
+
+    data = json.loads(recording.read_text(encoding="utf-8"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "recording.json").write_text(json.dumps(redact_recording(data), indent=2), encoding="utf-8")
+    (out_dir / "recording.source").write_text(str(recording.resolve()), encoding="utf-8")
+
+
 def _do_replay(
     recording: Path, out: Path, script: Path, headless: bool, cookie: str | None,
     pre_hook: str | None, timeout_ms: int, settle_ms: int, chrome: str | None,
@@ -192,6 +206,7 @@ def run(
 ):
     """Ingest, replay and merge in one go. Writes clicks.json, network.json and session.json."""
     click_log = _do_ingest(recording, out_dir / "clicks.json", keep_noise)
+    _keep_recording(recording, out_dir)
     net_log = None
     if not skip_replay:
         net_log = _do_replay(
@@ -456,9 +471,12 @@ def analyze(
     if pending:
         payload = pending[0].value if hasattr(pending[0], "value") else pending[0]
         _show_pending(payload)
+        # Answer with the same --until the run used, so approving a plan that
+        # proposes a module does not start a builder this run left out.
+        scope = f"--until {until} " if until else ""
         console.print(
-            f"\nApprove with:  odoo-miner analyze {run_dir} --approve "
-            f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} --reject "
+            f"\nApprove with:  odoo-miner analyze {run_dir} {scope}--approve "
+            f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} {scope}--reject "
             f"--thread {thread_id} --notes \"why\""
         )
         return

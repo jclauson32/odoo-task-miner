@@ -75,15 +75,19 @@ def bound_tools(run_dir: Path, module_dir: Path, module: str) -> list[Callable[.
             recording: the Recorder JSON to replay, e.g. /run/after_recording.json.
             output: folder for the replay's artifacts, e.g. /run/after.
         """
-        return odoo_ops.replay_workflow(resolve(recording), resolve(output), module=module)
+        source = Path(run_dir) / "recording.source"
+        original = source.read_text(encoding="utf-8").strip() if source.exists() else None
+        return odoo_ops.replay_workflow(
+            resolve(recording), resolve(output), module=module, original_recording=original
+        )
 
     def measure_effort(output: str = "/run/after") -> str:
-        """Segment and score a replayed run; returns its total effort.
+        """Score the replayed run against the original, the same way for both.
 
         Args:
             output: the replay's folder, e.g. /run/after.
         """
-        return odoo_ops.measure_effort(resolve(output))
+        return odoo_ops.measure_effort(resolve(output), before_dir=str(run_dir))
 
     def git_push_feature_branch(module_name: str, title: str) -> str:
         """Commit /addons/<module> on feat/<module> and push it. Pauses for approval.

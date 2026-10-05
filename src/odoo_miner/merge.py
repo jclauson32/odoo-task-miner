@@ -23,13 +23,17 @@ WRITE_METHODS = {
     "action_archive", "action_unarchive", "message_post",
 }
 WRITE_PREFIXES = ("action_", "button_")
+# Odoo's convention for smart buttons: action_view_* opens related records and
+# returns an action; it changes nothing. Checked before the write rules, which
+# would otherwise count every such hop as a write.
+NAVIGATION_PREFIXES = ("action_view_",)
 
 
 def classify(call: NetworkCall) -> str:
     endpoint = call.endpoint or ""
     method = call.method or ""
 
-    if endpoint.endswith("/web/action/load"):
+    if endpoint.endswith("/web/action/load") or method.startswith(NAVIGATION_PREFIXES):
         return "action_load"
     if "/web/dataset/call_button" in endpoint:
         return "write"

@@ -18,6 +18,8 @@ from .odoo_urls import parse_odoo_url
 SETUP_STEPS = {"setViewport", "emulateNetworkConditions"}
 # Steps that duplicate information already in another step.
 NOISE_STEPS = {"keyUp"}
+# Browser-internal pages, e.g. the new tab a recording was started from.
+BROWSER_PAGE = re.compile(r"^(chrome|about|edge|brave|chrome-search):")
 
 _NAME_ATTR = re.compile(r"\[name=['\"]?([\w.\-]+)['\"]?\]")
 
@@ -33,6 +35,26 @@ def _flatten_selector(selector: Any) -> str:
     return str(selector)
 
 
+_ROLE_SUFFIX = re.compile(r"\[role=.*\]$")
+_ICON_GLYPHS = re.compile("[-]")  # icon-font characters, not words
+
+
+def _aria_label(parts: list[str]) -> Optional[str]:
+    """Readable accessible name from an aria selector chain.
+
+    The Recorder often targets an icon inside a button, giving chains like
+    "aria/Save manually >> aria/[role="generic"]". The inner part has no name,
+    so walk outwards to the nearest part that does.
+    """
+    for part in reversed(parts):
+        if not part.startswith("aria/"):
+            continue
+        label = _ICON_GLYPHS.sub("", _ROLE_SUFFIX.sub("", part[len("aria/"):])).strip()
+        if label:
+            return label
+    return None
+
+
 def parse_target(raw_selectors: Optional[list]) -> Optional[Target]:
     if not raw_selectors:
         return None
@@ -41,9 +63,11 @@ def parse_target(raw_selectors: Optional[list]) -> Optional[Target]:
     target = Target(selectors=flat)
 
     for sel in flat:
-        last = sel.split(" >> ")[-1]
-        if last.startswith("aria/") and target.aria_label is None:
-            target.aria_label = last[len("aria/"):]
+        parts = sel.split(" >> ")
+        last = parts[-1]
+        if last.startswith("aria/"):
+            if target.aria_label is None:
+                target.aria_label = _aria_label(parts)
         elif last.startswith("text/") and target.text is None:
             target.text = last[len("text/"):]
         elif not last.startswith(("xpath/", "pierce/", "aria/", "text/")) and target.css is None:
@@ -77,11 +101,18 @@ def parse_recording(data: dict, source: str = "<memory>", keep_noise: bool = Fal
         if not step_type:
             raise RecordingError(f"Step {step_index} has no 'type'.")
 
-        if step_type == "navigate":
+        browser_page = step_type == "navigate" and bool(BROWSER_PAGE.match(step.get("url") or ""))
+        if step_type == "navigate" and not browser_page:
             current_url = step.get("url") or current_url
 
-        skip = step_type in SETUP_STEPS or (not keep_noise and step_type in NOISE_STEPS)
+        skip = (
+            step_type in SETUP_STEPS
+            or browser_page
+            or (not keep_noise and step_type in NOISE_STEPS)
+        )
         nav_url = _navigation_url(step)
+        if nav_url and BROWSER_PAGE.match(nav_url):
+            nav_url = None
 
         if not skip:
             page_url = step.get("url") if step_type == "navigate" else current_url

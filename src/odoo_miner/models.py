@@ -85,6 +85,10 @@ class NetworkLog(BaseModel):
     completed: bool = True
     failed_step: Optional[int] = None
     error: Optional[str] = None
+    failed_url: Optional[str] = None
+    failure_screenshot: Optional[str] = None
+    # Which of the Recorder's alternative selectors replay used, per step index.
+    selectors_used: dict[str, Optional[str]] = Field(default_factory=dict)
     calls: list[NetworkCall]
 
 

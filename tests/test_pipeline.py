@@ -179,3 +179,39 @@ def test_cli_bad_input(tmp_path):
 def test_cli_replay_missing_script(tmp_path):
     r = runner.invoke(app, ["replay", str(RECORDING), "--script", str(tmp_path / "nope.mjs")])
     assert r.exit_code == 1
+
+
+# --- Real Odoo 18 recording ------------------------------------------------
+
+REAL = FIXTURES / "rfq_to_payment.json"
+
+
+def test_real_recording_skips_new_tab_and_keeps_indexes():
+    log = load_recording(REAL)
+    assert all(not (c.url or "").startswith("chrome://") for c in log.clicks)
+    first = log.clicks[0]
+    assert first.type == "navigate" and first.url.endswith("/web/login") and first.step_index == 2
+    new_button = next(c for c in log.clicks if c.target and c.target.aria_label == "New")
+    assert new_button.step_index == 11  # matches the replay's step numbering
+
+
+def test_real_recording_page_context():
+    log = load_recording(REAL)
+    after_login = next(c for c in log.clicks if c.step_index == 9)
+    assert after_login.page_url == "http://localhost:8069/odoo"
+
+
+def test_aria_label_walks_out_of_icon_chains():
+    log = load_recording(REAL)
+    by_step = {c.step_index: c for c in log.clicks}
+    assert by_step[14].target.aria_label == "Save manually"     # icon inside the save button
+    assert by_step[27].target.aria_label == "Confirm Order"
+    assert by_step[9].target.aria_label is None                  # apps-menu icon has no name
+    assert by_step[30].target.aria_label == "Products"           # 'Products[role="menuitem"]'
+
+
+def test_show_does_not_eat_brackets(tmp_path):
+    out = tmp_path / "clicks.json"
+    runner.invoke(app, ["ingest", str(REAL), "-o", str(out)])
+    r = runner.invoke(app, ["show", str(out)], env={"COLUMNS": "200"})
+    assert "[FRT-EXP] Expedite freight" in r.output

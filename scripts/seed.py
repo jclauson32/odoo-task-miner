@@ -13,7 +13,7 @@ goods, and leaves a *draft* vendor bill for a buyer to investigate in the demo:
 Uses Odoo's JSON-RPC API and only the standard library. Safe to re-run:
 scenarios that already exist are skipped.
 
-    python scripts/seed.py [--url http://localhost:8069] [--db demo] [--user admin] [--password admin]
+    python3 scripts/seed.py [--url http://localhost:8069] [--db demo] [--user admin] [--password admin]
 """
 
 from __future__ import annotations

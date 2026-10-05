@@ -1,7 +1,7 @@
 # Odoo 18 Community + PostgreSQL 16 for the demo.
 #
 #   ./scripts/init_db.sh        create the "demo" database (first time only)
-#   python scripts/seed.py      add the purchasing scenarios
+#   python3 scripts/seed.py     add the purchasing scenarios
 #   ./scripts/snapshot_db.sh    save the state replays reset to
 #   ./scripts/restore_db.sh     reset to the snapshot (use as --pre-hook)
 #

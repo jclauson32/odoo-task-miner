@@ -19,6 +19,7 @@ from typing import Optional
 import typer
 from pydantic import BaseModel, ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .merge import merge as merge_logs
@@ -66,6 +67,7 @@ def _do_ingest(recording: Path, out: Path, keep_noise: bool) -> ClickLog:
 def _do_replay(
     recording: Path, out: Path, script: Path, headless: bool, cookie: Optional[str],
     pre_hook: Optional[str], timeout_ms: int, settle_ms: int, chrome: Optional[str],
+    screenshots: Optional[Path] = None,
 ) -> NetworkLog:
     if not script.exists():
         _fail(f"Replay script not found at {script}. Pass --script or set ODOO_MINER_REPLAY.")
@@ -93,7 +95,11 @@ def _do_replay(
         cmd += ["--cookie", cookie]
     if chrome:
         cmd += ["--chrome", chrome]
+    if screenshots:
+        cmd += ["--screenshots", str(screenshots.resolve())]
 
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.unlink(missing_ok=True)  # never mistake an old run's output for this one
     console.print(f"Replaying {recording} …")
     result = subprocess.run(cmd)
     if not out.exists():
@@ -107,6 +113,8 @@ def _do_replay(
             f"[yellow]Replay stopped at step {log.failed_step}: {log.error}[/yellow]\n"
             f"Partial capture saved ({len(log.calls)} calls) → {out}"
         )
+        if log.failure_screenshot:
+            err.print(f"What the page looked like when it stopped: {log.failure_screenshot}")
     return log
 
 
@@ -146,13 +154,14 @@ def replay(
     timeout_ms: int = typer.Option(10000, "--timeout", help="Per-step timeout in milliseconds."),
     settle_ms: int = typer.Option(500, "--settle", help="Network idle time to wait for after each step."),
     chrome: Optional[str] = typer.Option(None, help="Path to a Chrome/Chromium executable."),
+    screenshots: Optional[Path] = typer.Option(None, help="Folder to save a screenshot after every step."),
 ):
     """Replay a recording with Puppeteer and capture Odoo backend calls per step.
 
     Replaying repeats every write in the recording. Restore your database first
     (see --pre-hook) or the second run will fail or duplicate records.
     """
-    _do_replay(recording, out, script, headless, cookie, pre_hook, timeout_ms, settle_ms, chrome)
+    _do_replay(recording, out, script, headless, cookie, pre_hook, timeout_ms, settle_ms, chrome, screenshots)
 
 
 @app.command()
@@ -179,6 +188,7 @@ def run(
     timeout_ms: int = typer.Option(10000, "--timeout"),
     settle_ms: int = typer.Option(500, "--settle"),
     chrome: Optional[str] = typer.Option(None),
+    screenshots: bool = typer.Option(False, help="Save a screenshot after every replay step into OUT_DIR/screenshots."),
     keep_noise: bool = typer.Option(False),
 ):
     """Ingest, replay and merge in one go. Writes clicks.json, network.json and session.json."""
@@ -188,6 +198,7 @@ def run(
         net_log = _do_replay(
             recording, out_dir / "network.json", script, headless, cookie,
             pre_hook, timeout_ms, settle_ms, chrome,
+            out_dir / "screenshots" if screenshots else None,
         )
     _do_merge(click_log, net_log, out_dir / "session.json")
 
@@ -214,7 +225,7 @@ def show(path: Path = typer.Argument(..., help="clicks.json or session.json")):
         screen = " ".join(filter(None, [c.page.model, str(c.page.record_id or "") or None, c.page.view_type])) or (
             "/".join(c.page.path_slugs)
         )
-        row = [str(c.index), c.type, target[:50], (c.value or c.key or "")[:30], screen]
+        row = [str(c.index), c.type, escape(target[:50]), escape((c.value or c.key or "")[:30]), escape(screen)]
         if is_session:
             row.append("\n".join(f"{k.kind}: {k.method}" for k in c.calls))
         table.add_row(*row)

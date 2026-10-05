@@ -5,6 +5,9 @@ structured data the analysis agents can reason about: every step, the element
 it touched, the screen and record it happened on, and the exact backend calls
 it triggered.
 
+Building the analysis agents on top of this? Start with `AGENTS.md`, then
+`docs/AGENT_BUILD_GUIDE.md`.
+
 ```
 recording.json ──ingest──▶ clicks.json ─┐
        │                                ├─merge──▶ session.json ──▶ segmenter_agent → tracer_agent → …
@@ -20,7 +23,7 @@ replay run on your machine and talk to Odoo at `http://localhost:8069`.
 
 ```bash
 ./scripts/init_db.sh          # creates "demo" with Purchase, Inventory, Invoicing (admin / admin)
-python scripts/seed.py        # adds the purchasing scenarios below
+python3 scripts/seed.py        # adds the purchasing scenarios below
 ./scripts/snapshot_db.sh      # saves "demo_snapshot"; replays reset to this
 ```
 
@@ -101,9 +104,25 @@ so a stage can be inspected or re-run on its own.
 - **No human timing.** The Recorder format stores no timestamps, and replay
   timestamps reflect the replay, not the person. Difficulty is scored from
   structure, not time.
-- **Late requests.** After each step the replay waits for the network to go
-  idle (`--settle`, default 500 ms) so that onchange/autosave calls land on the
-  step that caused them. Attribution is usually right but not guaranteed.
+- **Which element gets clicked.** The Recorder saves several alternative
+  selectors per step and the replay library normally clicks whichever matches
+  first. On Odoo that can pick the wrong element (for example `a.focus`, the
+  menu item that happened to be highlighted while recording). The replay
+  instead waits for an alternative that matches exactly one visible element,
+  preferring ids, then accessible names, then visible text, then CSS, then
+  XPath, and ignores selectors based on momentary state (`.focus`, `.active`,
+  `.show`). `network.json` lists the selector used for each step under
+  `selectors_used`.
+- **Late requests.** After each step the replay waits until no Odoo backend
+  call has been in flight for `--settle` ms (default 500), so onchange/autosave
+  calls land on the step that caused them. Only backend calls count, because
+  Odoo keeps other connections open permanently.
+- **Debugging a failed replay.** On failure the replay saves
+  `network.failure.png` next to `network.json` showing the page where it
+  stopped. Add `--screenshots` to `run` to save a screenshot after every step.
+- **New-tab steps are skipped.** Recordings started from a new tab begin with
+  `chrome://newtab`, which a fresh browser can't open; both ingest and replay
+  skip browser-internal pages and keep the original step numbers.
 - **Call kinds are hints.** The read/write classification uses known Odoo
   method names and `action_`/`button_` prefixes. Custom methods come out as
   `unknown` for `tracer_agent` to resolve against the backend code.

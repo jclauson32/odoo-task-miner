@@ -14,3 +14,9 @@ node_modules/
 # Pipeline output
 out/
 *.local.json
+
+# Secrets
+.env
+
+# Odoo source checkout for the agents (ODOO_SOURCE)
+vendor/

@@ -159,8 +159,8 @@ def test_cli_ingest_merge_show(tmp_path):
     assert r.exit_code == 0, r.output
     assert Session.model_validate_json(session.read_text()).clicks[-1].has_write
 
-    r = runner.invoke(app, ["show", str(session)])
-    assert r.exit_code == 0 and "action_post" in r.output
+    r = runner.invoke(app, ["show", str(session)], env={"COLUMNS": "200"})
+    assert r.exit_code == 0 and "account.move.action_post" in r.output
 
 
 def test_cli_run_skip_replay(tmp_path):
@@ -210,6 +210,15 @@ def test_aria_label_walks_out_of_icon_chains():
     assert by_step[27].target.aria_label == "Confirm Order"
     assert by_step[9].target.aria_label is None                  # apps-menu icon has no name
     assert by_step[30].target.aria_label == "Products"           # 'Products[role="menuitem"]'
+
+
+def test_show_numbers_rows_by_recording_step_and_filters_a_range(tmp_path):
+    out = tmp_path / "clicks.json"
+    runner.invoke(app, ["ingest", str(REAL), "-o", str(out)])
+    r = runner.invoke(app, ["show", str(out), "--from", "27", "--to", "27"], env={"COLUMNS": "200"})
+    assert r.exit_code == 0
+    assert "Confirm Order" in r.output            # step 27 by recording number
+    assert "Save manually" not in r.output        # step 14 is outside the range
 
 
 def test_show_does_not_eat_brackets(tmp_path):

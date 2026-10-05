@@ -203,34 +203,54 @@ def run(
 
 
 @app.command()
-def show(path: Path = typer.Argument(..., help="clicks.json or session.json")):
-    """Print a click log or session as a table."""
+def show(
+    path: Path = typer.Argument(..., help="clicks.json or session.json"),
+    first: int | None = typer.Option(None, "--from", help="First step number to show."),
+    last: int | None = typer.Option(None, "--to", help="Last step number to show."),
+):
+    """Print a click log or session as a table, numbered by recording step."""
     data = json.loads(path.read_text(encoding="utf-8"))
     is_session = "unattributed_calls" in data
     log = Session.model_validate(data) if is_session else ClickLog.model_validate(data)
+    clicks = [
+        c for c in log.clicks
+        if (first is None or c.step_index >= first) and (last is None or c.step_index <= last)
+    ]
+
+    def screen(c) -> str:
+        parts = [c.page.model, str(c.page.record_id or "") or None, c.page.view_type]
+        return " ".join(filter(None, parts)) or "/".join(c.page.path_slugs)
+
+    # Odoo 18 rarely puts the screen in the URL; drop the column when it is empty.
+    show_screen = any(screen(c) for c in clicks)
 
     table = Table(title=log.title or str(path))
-    table.add_column("#", justify="right")
+    table.add_column("Step", justify="right")
     table.add_column("Type")
     table.add_column("Target")
     table.add_column("Value")
-    table.add_column("Screen")
+    if show_screen:
+        table.add_column("Screen")
     if is_session:
         table.add_column("Backend calls", overflow="fold")
 
-    for c in log.clicks:
+    for c in clicks:
         t = c.target
         target = (t.aria_label or t.text or t.button_name or t.css or "") if t else (c.url or "")
-        screen = " ".join(filter(None, [c.page.model, str(c.page.record_id or "") or None, c.page.view_type])) or (
-            "/".join(c.page.path_slugs)
-        )
-        row = [str(c.index), c.type, escape(target[:50]), escape((c.value or c.key or "")[:30]), escape(screen)]
+        row = [str(c.step_index), c.type, escape(target[:50]), escape((c.value or c.key or "")[:30])]
+        if show_screen:
+            row.append(escape(screen(c)))
         if is_session:
-            row.append("\n".join(f"{k.kind}: {k.method}" for k in c.calls))
+            calls = []
+            for k in c.calls:
+                name = f"{k.model}.{k.method}" if k.model else (k.method or k.endpoint)
+                calls.append(escape(f"{k.kind} {name}"))
+                if k.rpc_error:
+                    calls.append(f"[red]error: {escape(k.rpc_error.strip()[:80])}[/red]")
+            row.append("\n".join(calls))
         table.add_row(*row)
 
     console.print(table)
-
 
 
 # ---------------------------------------------------------------- analysis stages

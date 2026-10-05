@@ -16,6 +16,7 @@ import socket
 import struct
 import subprocess
 import zlib
+from pathlib import Path
 from typing import TypedDict
 
 import pytest
@@ -615,3 +616,41 @@ def test_email_attachments_are_translated_from_virtual_paths(bound, monkeypatch)
         str((run_dir / "after/screenshots/step-001.png").resolve()),
     ]
     assert "outside" in tools["send_report_email"]("s", "b", ["/run/../../../etc/passwd"])
+
+
+# ----------------------------------------------------------------- the findings report
+
+
+def test_report_is_built_from_the_run_and_attaches_the_friction_screenshots(tmp_path):
+    from odoo_miner.agents.contracts import Assessment, Plan, SegmentAssessment, StepDifficulty
+    from odoo_miner.agents.reporting import compose_report
+
+    (tmp_path / "plan.json").write_text(Plan(
+        decision="no_change", summary="The bill date is a deliberate control.",
+        risks=["Defaulting the date would weaken an audit control."],
+    ).model_dump_json())
+    (tmp_path / "plan.md").write_text("# Plan\n")
+    (tmp_path / "assessment.json").write_text(Assessment(session="s", total_effort=8, segments=[
+        SegmentAssessment(segment_id="s10", effort=5, friction=["error: bill date required"], steps=[
+            StepDifficulty(step_index=50, score=4, signals={"error": 1.0}),
+            StepDifficulty(step_index=51, score=1, signals={}),
+        ]),
+    ]).model_dump_json())
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    for index in (50, 51):
+        (shots / f"step-{index:03d}.png").write_bytes(_png())
+
+    subject, body, attachments = compose_report(tmp_path)
+
+    assert subject.startswith("odoo-miner: no change")
+    assert "deliberate control" in body and "bill date required" in body
+    assert "checked and found" in body
+    assert [Path(a).name for a in attachments] == ["plan.md", "step-050.png"]
+
+
+def test_report_needs_a_plan(tmp_path):
+    from odoo_miner.agents.reporting import compose_report
+
+    with pytest.raises(FileNotFoundError, match="plan.json"):
+        compose_report(tmp_path)

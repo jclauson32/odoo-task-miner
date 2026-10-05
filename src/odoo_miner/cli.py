@@ -467,5 +467,36 @@ def doctor():
     console.print("\n[green]Ready.[/green]")
 
 
+@app.command()
+def report(
+    run_dir: Path = typer.Argument(..., help="Run folder with plan.json (and screenshots/, if replayed with --screenshots)."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Send without asking for confirmation."),
+):
+    """Email the findings - the plan and screenshots of where the user got stuck - to REPORT_EMAIL_TO."""
+    import os
+
+    from .agents.config import settings
+    from .agents.reporting import compose_report
+    from .agents.tools.delivery import send_report_email
+
+    settings()
+    try:
+        subject, body, attachments = compose_report(run_dir)
+    except FileNotFoundError as exc:
+        _fail(str(exc))
+    to = os.environ.get("REPORT_EMAIL_TO") or "(REPORT_EMAIL_TO not set)"
+    console.print(f"[bold]To:[/bold] {escape(to)}\n[bold]Subject:[/bold] {escape(subject)}")
+    for path in attachments:
+        console.print(f"  [dim]attach[/dim] {escape(path)}")
+    if not yes and not typer.confirm("Send it?", default=False):
+        console.print("Not sent.")
+        raise typer.Exit(code=1)
+    result = send_report_email(subject, body, attachments)
+    if result.startswith("sent"):
+        console.print(f"[green]✓[/green] {escape(result)}")
+    else:
+        _fail(result)
+
+
 if __name__ == "__main__":
     app()

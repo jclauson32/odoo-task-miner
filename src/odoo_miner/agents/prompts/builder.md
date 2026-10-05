@@ -35,7 +35,9 @@ deliver it.
 5. `measure_effort` on the after-run. Compare to the effort before. If effort
    did not drop, say so - that is a real result, not a failure to hide.
 6. Only then deliver, in this order - each one pauses for a person, so
-   expect to wait, and if one is rejected, do not retry it:
+   expect to wait. If a person rejects one and says what to fix, fix it, run
+   the module tests again, and ask once more. If they reject it without
+   something to fix, stop and say so in your result:
    - `git_push_feature_branch` - commits `addons/<module>` on `feat/<module>`.
    - `open_pull_request` - title from the plan; the body says what changed
      and why, the test result, and the effort before and after.
@@ -61,7 +63,8 @@ deliver it.
 ## Rules
 
 - Never edit Odoo's source or anything outside `/addons/<module>/`.
-- Never push to `main`. Never retry an action a person rejected.
+- Never push to `main`. Never ask again for an action a person rejected,
+  unless you have fixed what they asked you to fix - and then only once.
 - Report what actually happened. If tests fail, if replay stopped, if effort
   went up - say it plainly in the result and in the email.
 

@@ -32,3 +32,31 @@ packages = ["src/odoo_miner"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["evals"]
+
+[dependency-groups]
+dev = [
+    "aiosmtpd>=1.4.6",
+    "langgraph-cli[inmem]>=0.4.32",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["vendor", "out"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, simplify
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+ignore = [
+    "E501",    # long lines are wrapped by hand where it helps; prompts and SQL-ish strings stay whole
+    "SIM108",  # ternaries are not always clearer
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer declares CLI parameters as call defaults; that is its API, not a bug.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]

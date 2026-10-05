@@ -8,13 +8,12 @@ boundaries actually fall and what to call each segment.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..models import Session, SessionClick
 from .config import load_prompt, model_for, trace_config
-from .contracts import Segment, SegmentLog
+from .contracts import SegmentLog
 
 # keyDown steps that carry no intent of their own. Enter is meaningful (it
 # submits), Tab only moves focus.
@@ -40,7 +39,7 @@ def boundary_hints(session: Session) -> dict[int, list[str]]:
     RPC error marks a failed attempt.
     """
     hints: dict[int, list[str]] = {}
-    last_model: Optional[str] = None
+    last_model: str | None = None
 
     for click in session.clicks:
         marks: list[str] = []
@@ -149,7 +148,7 @@ def reattach_noise(log: SegmentLog, session: Session) -> SegmentLog:
         i: seg.segment_id for seg in log.segments for i in seg.step_indexes
     }
     additions: dict[str, list[int]] = {}
-    previous: Optional[int] = None
+    previous: int | None = None
 
     for click in session.clicks:
         if is_noise(click) and previous is not None:
@@ -171,7 +170,7 @@ def reattach_noise(log: SegmentLog, session: Session) -> SegmentLog:
     return log.model_copy(update={"segments": segments})
 
 
-def build_segmenter(model: Optional[str] = None):
+def build_segmenter(model: str | None = None):
     """The LangChain agent. One focused judgement, validated structured output."""
     from langchain.agents import create_agent
 

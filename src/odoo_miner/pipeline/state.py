@@ -7,10 +7,10 @@ single stage re-run.
 
 from __future__ import annotations
 
-from typing import Annotated, Optional, TypedDict
+from typing import Annotated, TypedDict
 
 
-def _extend(left: Optional[list], right: Optional[list]) -> list:
+def _extend(left: list | None, right: list | None) -> list:
     """Reducer so nodes can append errors without clobbering each other."""
     return (left or []) + (right or [])
 

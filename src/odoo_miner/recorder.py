@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .models import Click, ClickLog, Target
 from .odoo_urls import parse_odoo_url
@@ -39,7 +39,7 @@ _ROLE_SUFFIX = re.compile(r"\[role=.*\]$")
 _ICON_GLYPHS = re.compile("[-]")  # icon-font characters, not words
 
 
-def _aria_label(parts: list[str]) -> Optional[str]:
+def _aria_label(parts: list[str]) -> str | None:
     """Readable accessible name from an aria selector chain.
 
     The Recorder often targets an icon inside a button, giving chains like
@@ -55,7 +55,7 @@ def _aria_label(parts: list[str]) -> Optional[str]:
     return None
 
 
-def parse_target(raw_selectors: Optional[list]) -> Optional[Target]:
+def parse_target(raw_selectors: list | None) -> Target | None:
     if not raw_selectors:
         return None
 
@@ -82,7 +82,7 @@ def parse_target(raw_selectors: Optional[list]) -> Optional[Target]:
     return target
 
 
-def _navigation_url(step: dict) -> Optional[str]:
+def _navigation_url(step: dict) -> str | None:
     for event in step.get("assertedEvents") or []:
         if event.get("type") == "navigation" and event.get("url"):
             return event["url"]
@@ -94,7 +94,7 @@ def parse_recording(data: dict, source: str = "<memory>", keep_noise: bool = Fal
         raise RecordingError("Not a Chrome Recorder export: expected an object with a 'steps' list.")
 
     clicks: list[Click] = []
-    current_url: Optional[str] = None
+    current_url: str | None = None
 
     for step_index, step in enumerate(data["steps"]):
         step_type = step.get("type")

@@ -10,7 +10,6 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 from ..config import settings
 
@@ -18,7 +17,7 @@ COMPOSE = ["docker", "compose"]
 DEFAULT_TIMEOUT = 900
 
 
-def _run(cmd: list[str], timeout: int = DEFAULT_TIMEOUT, cwd: Optional[Path] = None) -> tuple[int, str]:
+def _run(cmd: list[str], timeout: int = DEFAULT_TIMEOUT, cwd: Path | None = None) -> tuple[int, str]:
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, cwd=str(cwd) if cwd else None
@@ -51,7 +50,7 @@ def install_module(name: str) -> str:
     return f"ok: {name} installed and Odoo restarted.\n{output[-1500:]}"
 
 
-def run_module_tests(name: str, run_dir: Optional[str] = None) -> str:
+def run_module_tests(name: str, run_dir: str | None = None) -> str:
     """Run an Odoo module's tests and save the full output.
 
     Args:
@@ -84,7 +83,7 @@ def run_module_tests(name: str, run_dir: Optional[str] = None) -> str:
     return f"tests passed; log at {log_path}"
 
 
-def replay_workflow(recording_path: str, run_dir: str, module: Optional[str] = None) -> str:
+def replay_workflow(recording_path: str, run_dir: str, module: str | None = None) -> str:
     """Restore the database, optionally install a module, and replay a recording.
 
     Args:
@@ -124,9 +123,9 @@ def measure_effort(run_dir: str) -> str:
     Returns:
         The total effort, and the per-segment efforts.
     """
-    from ..contracts import SegmentLog
     from ...models import Session
     from ..assessor import assess_deterministic
+    from ..contracts import SegmentLog
     from ..segmenter import run_segmenter
 
     path = Path(run_dir) / "session.json"

@@ -9,7 +9,7 @@ leave `plan.md` behind for a human.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import load_prompt, model_for, settings, trace_config
 from .contracts import Plan
@@ -22,7 +22,7 @@ PLAN_PROMPT = (
 )
 
 
-def build_planner(run_dir: Path, model: Optional[str] = None):
+def build_planner(run_dir: Path, model: str | None = None):
     """The deep agent. `/odoo/` is read-only; `/run/` is the run's artifacts."""
     from deepagents import FilesystemPermission, create_deep_agent
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend

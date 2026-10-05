@@ -14,7 +14,6 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import typer
 from pydantic import BaseModel, ValidationError
@@ -65,9 +64,9 @@ def _do_ingest(recording: Path, out: Path, keep_noise: bool) -> ClickLog:
 
 
 def _do_replay(
-    recording: Path, out: Path, script: Path, headless: bool, cookie: Optional[str],
-    pre_hook: Optional[str], timeout_ms: int, settle_ms: int, chrome: Optional[str],
-    screenshots: Optional[Path] = None,
+    recording: Path, out: Path, script: Path, headless: bool, cookie: str | None,
+    pre_hook: str | None, timeout_ms: int, settle_ms: int, chrome: str | None,
+    screenshots: Path | None = None,
 ) -> NetworkLog:
     if not script.exists():
         _fail(f"Replay script not found at {script}. Pass --script or set ODOO_MINER_REPLAY.")
@@ -118,7 +117,7 @@ def _do_replay(
     return log
 
 
-def _do_merge(clicks: ClickLog, network: Optional[NetworkLog], out: Path) -> Session:
+def _do_merge(clicks: ClickLog, network: NetworkLog | None, out: Path) -> Session:
     session = merge_logs(clicks, network)
     _write(session, out)
     writes = sum(1 for c in session.clicks if c.has_write)
@@ -147,14 +146,14 @@ def replay(
     out: Path = typer.Option(Path("network.json"), "--out", "-o"),
     script: Path = ReplayScript,
     headless: bool = typer.Option(True, help="Run Chrome without a window."),
-    cookie: Optional[str] = typer.Option(None, help="Session cookie to set before replay, e.g. 'session_id=abc123'."),
-    pre_hook: Optional[str] = typer.Option(
+    cookie: str | None = typer.Option(None, help="Session cookie to set before replay, e.g. 'session_id=abc123'."),
+    pre_hook: str | None = typer.Option(
         None, help="Shell command to run first, e.g. a database restore. Replay aborts if it fails."
     ),
     timeout_ms: int = typer.Option(10000, "--timeout", help="Per-step timeout in milliseconds."),
     settle_ms: int = typer.Option(500, "--settle", help="Network idle time to wait for after each step."),
-    chrome: Optional[str] = typer.Option(None, help="Path to a Chrome/Chromium executable."),
-    screenshots: Optional[Path] = typer.Option(None, help="Folder to save a screenshot after every step."),
+    chrome: str | None = typer.Option(None, help="Path to a Chrome/Chromium executable."),
+    screenshots: Path | None = typer.Option(None, help="Folder to save a screenshot after every step."),
 ):
     """Replay a recording with Puppeteer and capture Odoo backend calls per step.
 
@@ -167,7 +166,7 @@ def replay(
 @app.command()
 def merge(
     clicks: Path = typer.Argument(..., help="Output of `ingest`."),
-    network: Optional[Path] = typer.Argument(None, help="Output of `replay` (optional)."),
+    network: Path | None = typer.Argument(None, help="Output of `replay` (optional)."),
     out: Path = typer.Option(Path("session.json"), "--out", "-o"),
 ):
     """Attach captured backend calls to the steps that triggered them."""
@@ -183,11 +182,11 @@ def run(
     skip_replay: bool = typer.Option(False, help="Only ingest; no network capture."),
     script: Path = ReplayScript,
     headless: bool = typer.Option(True),
-    cookie: Optional[str] = typer.Option(None),
-    pre_hook: Optional[str] = typer.Option(None),
+    cookie: str | None = typer.Option(None),
+    pre_hook: str | None = typer.Option(None),
     timeout_ms: int = typer.Option(10000, "--timeout"),
     settle_ms: int = typer.Option(500, "--settle"),
-    chrome: Optional[str] = typer.Option(None),
+    chrome: str | None = typer.Option(None),
     screenshots: bool = typer.Option(False, help="Save a screenshot after every replay step into OUT_DIR/screenshots."),
     keep_noise: bool = typer.Option(False),
 ):
@@ -274,7 +273,7 @@ def segment(
     log = run_segmenter_path(_session_arg(session), out, run=run_name)
     console.print(f"[green]✓[/green] {len(log.segments)} segments → {out}")
     for seg in log.segments:
-        console.print(f"  {seg.segment_id} [{seg.outcome}] {escape(seg.label)}")
+        console.print(f"  {seg.segment_id} {escape(f'[{seg.outcome}]')} {escape(seg.label)}")
 
 
 @app.command()
@@ -322,7 +321,7 @@ def assess(
 @app.command()
 def plan(
     run_dir: Path = typer.Argument(..., help="Run folder holding segments/traces/assessment."),
-    out: Optional[Path] = typer.Option(None, "--out", "-o"),
+    out: Path | None = typer.Option(None, "--out", "-o"),
     run_name: str = typer.Option("adhoc", "--run"),
 ):
     """Decide whether the workflow is worth changing, and plan the change."""
@@ -334,15 +333,37 @@ def plan(
     console.print(escape(result.summary))
 
 
+def _show_pending(payload: dict) -> None:
+    """Print what a pause is asking a person to approve."""
+    from .pipeline.graph import is_tool_gate
+
+    if is_tool_gate(payload):
+        console.print("\n[yellow]The builder wants to send something out. Approve each action:[/yellow]")
+        for request in payload["action_requests"]:
+            console.print(f"  [bold]{escape(request.get('name', '?'))}[/bold]")
+            for key, value in (request.get("args") or {}).items():
+                text = str(value)
+                console.print(f"    {key}: {escape(text[:300] + ('…' if len(text) > 300 else ''))}")
+        return
+
+    console.print("\n[yellow]Waiting for approval of the plan.[/yellow]")
+    for key in ("decision", "plan_summary", "module_name", "plan_md"):
+        if payload.get(key) is not None:
+            console.print(f"  {key}: {escape(str(payload[key]))}")
+    for key in ("acceptance_criteria", "risks"):
+        for item in payload.get(key) or []:
+            console.print(f"  {key[:-1]}: {escape(str(item))}")
+
+
 @app.command()
 def analyze(
     run_dir: Path = typer.Argument(..., help="Run folder containing session.json."),
-    until: Optional[str] = typer.Option(
+    until: str | None = typer.Option(
         None, "--until", help="Stop after this stage: segment, trace, assess, plan, approve, build."
     ),
-    run_name: Optional[str] = typer.Option(None, "--run", help="Defaults to the run folder's name."),
-    thread: Optional[str] = typer.Option(None, "--thread", help="Resume a run by thread id."),
-    approve: Optional[bool] = typer.Option(
+    run_name: str | None = typer.Option(None, "--run", help="Defaults to the run folder's name."),
+    thread: str | None = typer.Option(None, "--thread", help="Resume a run by thread id."),
+    approve: bool | None = typer.Option(
         None, "--approve/--reject", help="Answer a pending approval and continue."
     ),
     notes: str = typer.Option("", "--notes", help="Notes to record with the approval."),
@@ -350,7 +371,13 @@ def analyze(
     """Run the stages as one LangGraph pipeline, resumable and traced as one tree."""
     from langgraph.types import Command
 
-    from .pipeline.graph import build_graph, sqlite_checkpointer
+    from .pipeline.graph import (
+        build_graph,
+        is_tool_gate,
+        record_tool_decision,
+        resume_value,
+        sqlite_checkpointer,
+    )
     from .pipeline.state import STAGES
 
     if until is not None and until not in STAGES:
@@ -373,24 +400,24 @@ def analyze(
             }
             result = graph.invoke(state, config=config)
         else:
+            waiting = graph.get_state(config).interrupts
+            if not waiting:
+                _fail(f"Nothing is waiting for approval on thread {thread_id!r}.")
+            payload = waiting[0].value
+            if is_tool_gate(payload):
+                record_tool_decision(payload, approve, notes, name)
             result = graph.invoke(
-                Command(resume={"approved": approve, "notes": notes}), config=config
+                Command(resume=resume_value(payload, approve, notes)), config=config
             )
 
     pending = result.get("__interrupt__")
     if pending:
         payload = pending[0].value if hasattr(pending[0], "value") else pending[0]
-        console.print("\n[yellow]Waiting for approval.[/yellow]")
-        for key in ("decision", "plan_summary", "module_name", "plan_md"):
-            if payload.get(key) is not None:
-                console.print(f"  {key}: {escape(str(payload[key]))}")
-        for key in ("acceptance_criteria", "risks"):
-            for item in payload.get(key) or []:
-                console.print(f"  {key[:-1]}: {escape(str(item))}")
+        _show_pending(payload)
         console.print(
             f"\nApprove with:  odoo-miner analyze {run_dir} --approve "
             f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} --reject "
-            f"--thread {thread_id}"
+            f"--thread {thread_id} --notes \"why\""
         )
         return
 

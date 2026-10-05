@@ -8,21 +8,24 @@ else - and the two tools that send work out of the machine pause for a human.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import load_prompt, model_for, settings, trace_config
 from .contracts import BuildResult, Plan
 from .tools import delivery, odoo_ops, odoo_source
 
+# Every tool that sends work out of the machine pauses for a person first.
+GATED_TOOLS = ("git_push_feature_branch", "open_pull_request", "send_report_email")
+
 BUILD_PROMPT = (
     "Read /run/plan.json and implement it. Write the module, install it, run "
     "its tests until they pass, write /run/after_recording.json and replay it, "
-    "measure the effort before and after, then push the branch and send the "
-    "report. Return the build result."
+    "measure the effort before and after, then push the branch, open the pull "
+    "request and send the report. Return the build result."
 )
 
 
-def build_builder(run_dir: Path, plan: Plan, model: Optional[str] = None):
+def build_builder(run_dir: Path, plan: Plan, model: str | None = None):
     """The deep agent, scoped to one module."""
     from deepagents import FilesystemPermission, create_deep_agent
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
@@ -53,9 +56,9 @@ def build_builder(run_dir: Path, plan: Plan, model: Optional[str] = None):
         permissions=[
             FilesystemPermission(operations=["write"], paths=["/odoo/**"], mode="deny")
         ],
-        # Two human checkpoints: one before anything is pushed, one before
-        # anything is emailed.
-        interrupt_on={"git_push_feature_branch": True, "send_report_email": True},
+        # A person approves each push, pull request and email, even after
+        # approving the plan.
+        interrupt_on={name: True for name in GATED_TOOLS},
         response_format=BuildResult,
         name="builder_agent",
     )

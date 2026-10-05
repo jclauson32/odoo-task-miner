@@ -7,12 +7,14 @@ approval gate between planning and building. Each node calls the same
 
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
+from ..agents import audit
 from ..agents.assessor import run_assessor_path
 from ..agents.contracts import Plan
 from ..agents.planner import run_planner_path
@@ -76,7 +78,13 @@ def approve_node(state: PipelineState) -> dict:
     })
     if isinstance(decision, bool):           # tolerate a bare yes/no
         decision = {"approved": decision, "notes": ""}
-    return {"approval": dict(decision or {"approved": False, "notes": "no decision"})}
+    decision = dict(decision or {"approved": False, "notes": "no decision"})
+    audit.record(
+        "approve_plan", "approved" if decision.get("approved") else "rejected",
+        run=state.get("run"), plan=state["plan_path"], decision=plan.decision,
+        module=plan.module_name, notes=decision.get("notes") or None,
+    )
+    return {"approval": decision}
 
 
 def build_node(state: PipelineState) -> dict:
@@ -99,11 +107,42 @@ NODES = {
 }
 
 
+def is_tool_gate(payload: Any) -> bool:
+    """True when a pause is the builder asking to run a gated tool.
+
+    The pipeline pauses for two different reasons, and each expects a
+    differently shaped answer: the plan gate (approve_node) takes
+    `{"approved", "notes"}`, while the builder's tool gates (push, pull
+    request, email) take `{"decisions": [...]}`, one per requested action.
+    """
+    return isinstance(payload, dict) and "action_requests" in payload
+
+
+def resume_value(payload: Any, approved: bool, notes: str = "") -> dict:
+    """The answer to send back for a pause, in the shape that pause expects."""
+    if is_tool_gate(payload):
+        if approved:
+            decision: dict = {"type": "approve"}
+        else:
+            decision = {"type": "reject", "message": notes or "Rejected by the reviewer."}
+        return {"decisions": [decision for _ in payload["action_requests"]]}
+    return {"approved": approved, "notes": notes}
+
+
+def record_tool_decision(payload: Any, approved: bool, notes: str, run: str | None) -> None:
+    """Audit each gated tool call a person approved or rejected."""
+    for request in payload.get("action_requests", []):
+        audit.record(
+            f"approve_{request.get('name', 'tool')}", "approved" if approved else "rejected",
+            run=run, args=request.get("args"), notes=notes or None,
+        )
+
+
 def _approved(state: PipelineState) -> str:
     return "build" if (state.get("approval") or {}).get("approved") else END
 
 
-def build_graph(checkpointer: Any = None, until: Optional[str] = None):
+def build_graph(checkpointer: Any = None, until: str | None = None):
     """Compile the pipeline.
 
     Args:
@@ -125,7 +164,7 @@ def build_graph(checkpointer: Any = None, until: Optional[str] = None):
         graph.add_node(name, NODES[name])
 
     graph.add_edge(START, stages[0])
-    for current, following in zip(stages, stages[1:]):
+    for current, following in pairwise(stages):
         if current == "approve":
             graph.add_conditional_edges("approve", _approved, {"build": "build", END: END})
         else:

@@ -164,6 +164,14 @@ tail -1 out/audit.jsonl
 With a `no_change` plan the run ends here. With `customize`, approving starts
 the builder; see [Building a change](#building-a-change).
 
+The plan gate takes three answers:
+
+| Answer | Command | What happens |
+|---|---|---|
+| Approve | `--approve --notes "…"` | A `customize` plan goes to the builder, and your notes go with it as instructions ("approved; also refuse POs in another currency"). Any other decision ends the run. |
+| Send back | `--reject --notes "…"` | The planner revises the plan with your notes - they can state a business rule it could not have known - and stops at the gate again. The rejected plan is kept as `plan.rejected-1.md` and `.json`. At most two revisions. |
+| Reject | `--reject` with no notes | The run ends. |
+
 ## 6. Email the findings
 
 ```bash
@@ -224,6 +232,34 @@ notes sends the builder back to fix what you asked; it reruns its tests and
 asks once more. On the run in the README: 3 of 3 tests passing, effort 34 →
 22, and one rejected push (the columns showed on customer invoices) fixed
 on the second attempt.
+
+The second scenario adds the send-back: a process that a written policy
+decides.
+
+```bash
+odoo-miner run recordings/bill-exception-resolution.json -d out/exceptions \
+  --pre-hook ./scripts/restore_db.sh --screenshots
+odoo-miner analyze out/exceptions     # stops at the plan
+odoo-miner analyze out/exceptions --reject --notes "Policy: a vendor bill is recorded at PO terms …"
+odoo-miner analyze out/exceptions --approve --notes "Conditions: …"   # builds, then stops before the push
+```
+
+On the run in the README the first plan showed the PO's numbers on the bill.
+Sent back with the payables policy (the notes are in `out/audit.jsonl`), the
+planner revised it into an **Apply PO Terms** button
+(`purchase_bill_apply_po_terms`); the approval's conditions reached the
+builder; the first push was rejected for a unit-conversion bug the builder
+had hidden by changing a test; the second passed 10 of 10 tests and cut the
+replayed workflow from 47 steps to 24, effort 77 → 32. The previous plan is
+kept as `plan.rejected-1.md`. Each run's wording and decision can differ.
+
+To install the module from the pull request into a clean database and run
+its tests:
+
+```bash
+./scripts/restore_db.sh && ./scripts/install_module.sh purchase_bill_apply_po_terms
+./scripts/test_module.sh purchase_bill_apply_po_terms
+```
 
 ## Cost
 

@@ -53,8 +53,8 @@ Update this table and the log below whenever you stop working.
 | M3 | tracer_agent | **done** - expected methods found; every CodeRef exists (27/27, 23/23); prompt-cached |
 | M4 | assessor_agent | **done** - deterministic scores stable; bill error and dialog flagged |
 | M5 | LangGraph pipeline | **done** - one command, one trace; resumes after a crash |
-| M6 | planner_agent + approval | **done** - valid plan, readable plan.md, citations checked, graph pauses |
-| M7 | builder_agent | **done** - first end-to-end run on `recordings/bill-exception-review.json`: module installed, 3/3 tests, after-replay effort 34 → 22, branch + PR #1 + email, each gate approved; one push rejected and fixed |
+| M6 | planner_agent + approval | **done** - valid plan, readable plan.md, citations checked, graph pauses; a reviewer can send a plan back with notes (revised up to twice) or approve it with conditions the builder follows |
+| M7 | builder_agent | **done** - two end-to-end runs: `bill-exception-review.json` → `purchase_bill_match_columns` (3/3 tests, effort 34 → 22, PR #1) and `bill-exception-resolution.json` → `purchase_bill_apply_po_terms` (10/10 tests, 47 → 24 steps, effort 77 → 32, PR #2); each had one push rejected on review and fixed |
 | M8 | Demo polish | **mostly done** - `doctor`, `report`, runbook, Studio via `langgraph dev`, traces from a fresh terminal; no recorded backup video yet |
 
 ## What needs an API key
@@ -76,6 +76,29 @@ python evals/run_evals.py check
 Newest first. One entry per working session: date, who, what changed, what's
 next, anything surprising.
 
+- 2026-10-05 (later): Automated a process that a written policy decides, end
+  to end. Recorded `recordings/bill-exception-resolution.json` (an AP clerk on
+  all four seeded exceptions; `capture.mjs` now records chatter posts). The
+  planner's first plan showed the PO's numbers on the bill; sent back with the
+  payables policy, it became `purchase_bill_apply_po_terms`, an Apply PO
+  Terms button, approved with conditions. The builder's first push was
+  rejected: a PO in dozens billed in units came out 23.96 instead of 24, and
+  it had changed the test rather than the code. Fixed; 10/10 tests; the
+  after-replay posts all four bills at PO terms (checked in the database),
+  47 → 24 steps, effort 77 → 32; PR #2 and the email went out through the
+  gates (the email was sent back once for promising screenshots it lacked).
+  New: `--reject --notes` sends a plan back to be revised (`plan.rejected-N.*`
+  kept); approval notes now reach the builder; `show` renders `build.json`;
+  `scripts/test_module.sh`. Fixed: the citation check skipped every path under
+  the planner's `/odoo/` mount and still reported "all found"; module installs
+  and tests ran beside a running Odoo and collided with its start-up ("could
+  not serialize access due to concurrent update") - both scripts now stop the
+  web server, and the builder's tools call them. On `feat/exception-automation`.
+  Next: merge it and PRs #1/#2 after review; add the four-bill session to the
+  eval datasets; keep policies in a file the planner reads up front instead of
+  learning them from a send-back.
+  Surprise: the builder will weaken a test to get to green. The push gate
+  caught it because the reviewer read the test diff, not just the result.
 - 2026-10-05 (morning): First end-to-end build. Recorded (from the live UI)
   `recordings/bill-exception-review.json`: a buyer resolving two three-way-match
   exceptions by hopping to the PO and receipts. The planner chose `customize`

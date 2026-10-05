@@ -60,6 +60,43 @@ read-only columns on the bill lines:
 | Review | the first push was rejected (the columns leaked onto customer invoices); the builder fixed it, reran its tests, and asked again |
 | Delivery | branch `feat/purchase_bill_match_columns`, [pull request #1](https://github.com/jclauson32/odoo-task-miner/pull/1), report email with before/after screenshots - each approved by a person, each in `out/audit.jsonl` |
 
+## When a written rule decides the answer
+
+`recordings/bill-exception-resolution.json` is an AP clerk clearing all four
+seeded exceptions: a price variance, a partial receipt, rejected goods, and a
+freight charge on no PO. For each bill they open the PO and its receipts,
+come back, type a note quoting the numbers, correct the line and confirm - 47
+steps, and the four notes they type are the company's payables policy,
+applied by hand.
+
+The planner first proposed showing the PO's numbers on the bill. A reviewer
+sent the plan back with the policy - *record a bill at PO terms, remove a
+charge with no PO line and raise it with the vendor, explain every deviation
+in the chatter* - and asked for it as one action the clerk takes, with
+Confirm left to them. The revised plan worked out how:
+`purchase_bill_apply_po_terms`, an **Apply PO Terms** button on draft vendor
+bills, with the edge cases and risks named. It read Odoo's source to get the
+quantity right: a draft bill counts itself in `qty_to_invoice`, so copying
+that field would bill −400 of the 600 connectors received.
+
+| Check | Result |
+|---|---|
+| Plan | sent back once with the policy; then approved with conditions the builder followed (refuse POs in another currency, ask before removing lines, convert units, escape the chatter note) |
+| Module tests | 10 of 10 pass: one per acceptance criterion, plus the refusals |
+| Review | the first push was rejected: a PO for 2 dozen billed as 20 units came out 23.96 instead of 24, and the builder had changed the test rather than the code. Fixed in the code, test restored, approved on the second attempt |
+| Workflow replayed with the module installed | all four bills posted at PO terms (4.10, 600, 180, freight removed), each with one note listing old → new values - checked in the database |
+| Steps / effort, scored the same way before and after | 47 → 24 steps, 77 → 32 effort (**−58%**) |
+| Delivery | branch `feat/purchase_bill_apply_po_terms`, [pull request #2](https://github.com/jclauson32/odoo-task-miner/pull/2), report email with before/after screenshots - every decision in `out/audit.jsonl` |
+
+With the module in `addons/` (it is in pull request #2), see it in Odoo:
+
+```bash
+./scripts/restore_db.sh && ./scripts/install_module.sh purchase_bill_apply_po_terms
+./scripts/test_module.sh purchase_bill_apply_po_terms     # its 10 tests, about 15 s
+```
+
+then open a draft bill at http://localhost:8069/odoo/bills.
+
 ## How it works
 
 ```
@@ -93,7 +130,9 @@ a node in the same graph.
   confirmed is shown to the approver.
 - **A person approves the plan, then every outward action.** The build only
   starts after the plan is approved, and each push, pull request and email
-  pauses again. A test fails if any outward tool is not gated.
+  pauses again. A test fails if any outward tool is not gated. A reviewer can
+  send a plan back with notes - a business rule the planner could not know -
+  and it is revised; notes given with an approval go to the builder.
 - **Outward actions are narrow.** The builder can only write inside its own
   module folder and Odoo's source is read-only to every agent. Pushes go to
   `feat/<module>` from a temporary git worktree - never the base branch, never
@@ -102,7 +141,7 @@ a node in the same graph.
 - **Everything is on the record.** Approvals and outward actions are appended
   to `out/audit.jsonl` (who, when, what, outcome); every model call is traced
   in LangSmith with the run and stage.
-- **Tests need nothing.** 160 tests run with no API key, no Odoo and no
+- **Tests need nothing.** 167 tests run with no API key, no Odoo and no
   network; they cannot send mail, push, or emit traces. CI runs them and ruff
   on every push.
 
@@ -141,10 +180,10 @@ step, what to expect, and what to do when something fails.
 | `odoo-miner doctor` | Checks keys, Odoo, databases, source checkout, replay, email and GitHub; flags shell variables overriding `.env`. |
 | `odoo-miner run REC -d DIR` | Ingest, replay and merge one recording into `DIR`. |
 | `odoo-miner ingest` / `replay` / `merge` | The same three steps separately. |
-| `odoo-miner show FILE` | A click log or session as a table. |
+| `odoo-miner show FILE` | Any pipeline file as a table: click log, session, segments, traces, assessment, plan or build. |
 | `odoo-miner segment` / `trace` / `assess` / `plan` | One analysis stage. `assess --offline` needs no API key. |
 | `odoo-miner analyze DIR [--until STAGE]` | The stages as one resumable pipeline. |
-| `odoo-miner analyze DIR --approve` / `--reject --notes "…"` | Answer whichever approval the pipeline is waiting on. |
+| `odoo-miner analyze DIR --approve` / `--reject` [`--notes "…"`] | Answer whichever approval the pipeline is waiting on. At the plan, `--reject --notes` sends it back to be revised and `--approve --notes` gives the builder conditions. |
 | `odoo-miner report DIR` | Email the plan and screenshots of where the user got stuck to `REPORT_EMAIL_TO`, after you confirm. |
 | `odoo-miner audit [--run NAME]` | The audit log as a table: who approved or rejected what, and what was sent out. |
 
@@ -171,7 +210,10 @@ Re-running the seed skips scenarios that already exist.
 recreates the database from the snapshot, copies the attachments folder back
 and starts Odoo again - and starts it again if anything fails on the way. Pass
 it as `--pre-hook` so every replay starts from the same data. Custom modules go
-in `addons/`, which is mounted into the container.
+in `addons/`, which is mounted into the container;
+`./scripts/install_module.sh <module>` installs or updates one and
+`./scripts/test_module.sh <module>` runs its tests, both with Odoo's web server
+stopped while they work. The builder uses the same two scripts.
 
 ## Recording a workflow
 
@@ -241,7 +283,7 @@ only, with no backend calls.
 ## Development
 
 ```bash
-uv run pytest                        # 160 tests, no API key or Odoo needed
+uv run pytest                        # 167 tests, no API key or Odoo needed
 uv run ruff check src tests evals scripts
 uv run python evals/run_evals.py check   # evaluators against the gold labels, offline
 uv run langgraph dev                 # the pipeline in LangGraph Studio
@@ -259,7 +301,9 @@ src/odoo_miner/
   agents/tools/  odoo_source (search Odoo's code), odoo_ops (Docker, replay), delivery (push, PR, email)
   pipeline/    LangGraph state and graph
 replay/        Puppeteer replay that captures backend calls per step
-scripts/       database init, seed, snapshot, restore
+recordings/    Chrome Recorder exports of the workflows analyzed here
+addons/        Odoo modules the builder writes, mounted into the container
+scripts/       database init, seed, snapshot, restore; install and test a module
 evals/         gold labels and LangSmith evaluators
 tests/         unit and integration tests, recordings and sessions as fixtures
 docs/          runbook and the agent build guide

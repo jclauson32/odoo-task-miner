@@ -5,8 +5,8 @@ freshly restored Odoo, analyze it with the agent pipeline, review the plan at
 the approval gate, and email the findings. Every command below was run as
 written; the outputs shown are from those runs.
 
-Time: about 20 minutes once set up. Model usage: about $7 per full run, most
-of it the planner (see [Cost](#cost)).
+Time: about 20 minutes once set up. Model usage: $0.66 to about $7 per full
+run, depending mostly on how much source the planner reads (see [Cost](#cost)).
 
 All commands run from the repository root with the environment active:
 
@@ -110,7 +110,7 @@ odoo-miner analyze out/demo --until approve
 ```
 
 Runs segment → trace → assess → plan as one LangGraph run, one trace tree in
-LangSmith, then pauses. About 10 minutes; the planner is most of it. When it
+LangSmith, then pauses. Five to ten minutes; the planner is most of it. When it
 stops you will see the plan and the citation check:
 
 ```
@@ -217,7 +217,7 @@ Measured on the reference recording with Claude Sonnet 5:
 | segment | 1 | ~$0.09 |
 | trace | ~45, 82% of input from cache | ~$0.25 |
 | assess | 11-12 | ~$0.08 |
-| plan | ~70 (a Deep Agent reading Odoo's source) | ~$6.65 |
+| plan | 11-69 (a Deep Agent; it decides how much of Odoo's source to read) | $0.31-$6.65 |
 
 LangSmith shows the actual figures for every run, per stage.
 

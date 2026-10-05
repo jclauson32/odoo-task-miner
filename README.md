@@ -30,10 +30,12 @@ and paying - and hitting Odoo's "bill date required" error on the way.
 | segment | LangChain `create_agent` | 11-12 tasks in business language; boundary F1 0.78 and 0.75 against hand labels in two runs; found the failed confirm and the recovery | ~$0.09 |
 | trace | resolver in code + agent | every code reference exists (27/27, 23/23); confirm → `purchase_order.py:538`, post → `account_move.py:5558`, override chains included | ~$0.25 |
 | assess | 9 signals in code + agent | total effort 95; identical scores across runs; the bill error and its dialog flagged; model moves a score at most ±1 | ~$0.08 |
-| plan | Deep Agent | **No change.** The price friction is a training gap - the field is inline-editable in Purchase › Products - and the bill-date error is a deliberate audit control, which the obvious fix would weaken. 4 of 5 citations exact; the 5th, right claim in the wrong file, flagged by the citation check | ~$6.65 |
+| plan | Deep Agent | **No code change**, in two runs. The bill-date error is a deliberate audit control the obvious fix would weaken; the price detour is a training gap (run 1: the field is inline-editable in Purchase › Products) or bad catalog data (run 2: fix the two prices ahead of time). Run 1 cited 5 places, 4 exact and 1 flagged by the citation check; run 2's citations all checked out | $0.31-$6.65 |
 
 Costs are measured on Claude Sonnet 5 with LangSmith; the tracer figure is
-with prompt caching (82% of its input served from cache).
+with prompt caching (82% of its input served from cache). The planner decides
+how much of Odoo's source to read, so its cost varies most: 11 model calls in
+one run, 69 in another. A whole analysis has cost between $0.66 and about $7.
 
 ## How it works
 

@@ -56,10 +56,38 @@ def assess_node(state: PipelineState) -> dict:
     return {"assessment_path": str(out)}
 
 
+# A reviewer can send a plan back with notes this many times; then it ends.
+MAX_PLAN_REVISIONS = 2
+
+
 def plan_node(state: PipelineState) -> dict:
-    out = _run_dir(state) / "plan.json"
-    plan = run_planner_path(_run_dir(state), out, run=state.get("run", "adhoc"))
-    return {"plan_path": str(out), "decision": plan.decision}
+    run_dir = _run_dir(state)
+    out = run_dir / "plan.json"
+    feedback = state.get("review_notes") or None
+    if feedback:
+        # Keep the plan that was sent back, for the record and for the planner to read.
+        number = state.get("plan_revisions", 1)
+        for name in ("plan.json", "plan.md"):
+            previous = run_dir / name
+            if previous.exists():
+                previous.rename(run_dir / name.replace("plan.", f"plan.rejected-{number}.", 1))
+    plan = run_planner_path(run_dir, out, run=state.get("run", "adhoc"), feedback=feedback)
+    return {"plan_path": str(out), "decision": plan.decision, "review_notes": ""}
+
+
+def review_update(decision: dict, revisions: int) -> dict:
+    """The state change for a reviewer's answer at the plan gate.
+
+    Rejecting with notes sends the plan back for a revision, up to
+    MAX_PLAN_REVISIONS times; rejecting without notes, or once the revisions
+    are used up, ends the run.
+    """
+    update: dict = {"approval": decision}
+    notes = (decision.get("notes") or "").strip()
+    if not decision.get("approved") and notes and revisions < MAX_PLAN_REVISIONS:
+        update["review_notes"] = notes
+        update["plan_revisions"] = revisions + 1
+    return update
 
 
 def approve_node(state: PipelineState) -> dict:
@@ -81,12 +109,17 @@ def approve_node(state: PipelineState) -> dict:
     if isinstance(decision, bool):           # tolerate a bare yes/no
         decision = {"approved": decision, "notes": ""}
     decision = dict(decision or {"approved": False, "notes": "no decision"})
+    update = review_update(decision, state.get("plan_revisions", 0))
+    outcome = "approved" if decision.get("approved") else (
+        "sent back" if "review_notes" in update else "rejected"
+    )
     audit.record(
-        "approve_plan", "approved" if decision.get("approved") else "rejected",
+        "approve_plan", outcome,
         run=state.get("run"), plan=state["plan_path"], decision=plan.decision,
         module=plan.module_name, notes=decision.get("notes") or None,
+        revision=state.get("plan_revisions") or None,
     )
-    return {"approval": decision}
+    return update
 
 
 def build_node(state: PipelineState) -> dict:
@@ -94,7 +127,11 @@ def build_node(state: PipelineState) -> dict:
 
     out = _run_dir(state) / "build.json"
     run_builder_path(
-        _run_dir(state), Path(state["plan_path"]), out, run=state.get("run", "adhoc")
+        _run_dir(state),
+        Path(state["plan_path"]),
+        out,
+        run=state.get("run", "adhoc"),
+        notes=(state.get("approval") or {}).get("notes"),
     )
     return {"build_path": str(out)}
 
@@ -140,10 +177,13 @@ def record_tool_decision(payload: Any, approved: bool, notes: str, run: str | No
         )
 
 
-def _approved(state: PipelineState) -> str:
-    """Build only an approved plan that asks for a module; anything else ends here."""
-    approved = (state.get("approval") or {}).get("approved")
-    return "build" if approved and state.get("decision") == "customize" else END
+def _after_review(state: PipelineState) -> str:
+    """Build an approved plan that asks for a module; revise one sent back; else end."""
+    if (state.get("approval") or {}).get("approved"):
+        return "build" if state.get("decision") == "customize" else END
+    if state.get("review_notes"):
+        return "plan"
+    return END
 
 
 def build_graph(checkpointer: Any = None, until: str | None = None):
@@ -170,13 +210,15 @@ def build_graph(checkpointer: Any = None, until: str | None = None):
     graph.add_edge(START, stages[0])
     for current, following in pairwise(stages):
         if current == "approve":
-            graph.add_conditional_edges("approve", _approved, {"build": "build", END: END})
+            graph.add_conditional_edges(
+                "approve", _after_review, {"build": "build", "plan": "plan", END: END}
+            )
         else:
             graph.add_edge(current, following)
 
     last = stages[-1]
     if last == "approve":
-        graph.add_conditional_edges("approve", _approved, {"build": END, END: END})
+        graph.add_conditional_edges("approve", _after_review, {"build": END, "plan": "plan", END: END})
     else:
         graph.add_edge(last, END)
 

@@ -32,6 +32,18 @@ BUILD_PROMPT = (
 )
 
 
+def build_prompt(notes: str | None = None) -> str:
+    """The build request, carrying the notes the reviewer approved the plan with."""
+    if not notes or not notes.strip():
+        return BUILD_PROMPT
+    return (
+        BUILD_PROMPT
+        + "\n\nThe reviewer approved the plan with these notes. Follow them; where they "
+        "conflict with /run/plan.json, the notes win:\n\n"
+        + notes.strip()
+    )
+
+
 def path_resolver(run_dir: Path, module_dir: Path, module: str) -> Callable[[str], str]:
     """Map the agent's virtual paths to real ones, refusing anything that escapes.
 
@@ -171,12 +183,13 @@ def build_builder(run_dir: Path, plan: Plan, model: Any = None):
 
 
 def run_builder(
-    run_dir: Path, plan: Plan, agent: Any = None, run: str = "adhoc"
+    run_dir: Path, plan: Plan, agent: Any = None, run: str = "adhoc", notes: str | None = None
 ) -> BuildResult:
+    """Build an approved plan. `notes` are the reviewer's, given when approving it."""
     run_dir = Path(run_dir)
     agent = agent or build_builder(run_dir, plan)
     result = agent.invoke(
-        {"messages": [{"role": "user", "content": BUILD_PROMPT}]},
+        {"messages": [{"role": "user", "content": build_prompt(notes)}]},
         config=trace_config(run, "builder", module=plan.module_name or ""),
     )
     built = result["structured_response"]
@@ -186,10 +199,15 @@ def run_builder(
 
 
 def run_builder_path(
-    run_dir: Path, plan_path: Path, out: Path, agent: Any = None, run: str = "adhoc"
+    run_dir: Path,
+    plan_path: Path,
+    out: Path,
+    agent: Any = None,
+    run: str = "adhoc",
+    notes: str | None = None,
 ) -> BuildResult:
     plan = Plan.model_validate_json(Path(plan_path).read_text(encoding="utf-8"))
-    built = run_builder(run_dir, plan, agent=agent, run=run)
+    built = run_builder(run_dir, plan, agent=agent, run=run, notes=notes)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(built.model_dump_json(indent=2), encoding="utf-8")

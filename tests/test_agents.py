@@ -415,17 +415,110 @@ def test_graph_rejects_unknown_stage():
         build_graph(until="not_a_stage")
 
 
-def test_build_only_runs_when_approved():
+def test_after_review_builds_revises_or_ends():
     from langgraph.graph import END
 
-    from odoo_miner.pipeline.graph import _approved
+    from odoo_miner.pipeline.graph import _after_review
 
-    assert _approved({"approval": {"approved": True}, "decision": "customize"}) == "build"
-    assert _approved({"approval": {"approved": False}, "decision": "customize"}) == END
-    assert _approved({}) == END
+    assert _after_review({"approval": {"approved": True}, "decision": "customize"}) == "build"
+    assert _after_review({"approval": {"approved": False}, "decision": "customize"}) == END
+    assert _after_review({}) == END
     # An approved plan that needs no module has nothing to build.
     for decision in ("no_change", "data_fix", "configure"):
-        assert _approved({"approval": {"approved": True}, "decision": decision}) == END
+        assert _after_review({"approval": {"approved": True}, "decision": decision}) == END
+    # Sent back with notes: revise.
+    assert _after_review({"approval": {"approved": False}, "review_notes": "bill at PO terms"}) == "plan"
+
+
+def test_rejecting_with_notes_sends_the_plan_back_a_limited_number_of_times():
+    from odoo_miner.pipeline.graph import MAX_PLAN_REVISIONS, review_update
+
+    sent_back = review_update({"approved": False, "notes": "Policy: bill at PO terms."}, 0)
+    assert sent_back["review_notes"] == "Policy: bill at PO terms." and sent_back["plan_revisions"] == 1
+    assert "review_notes" not in review_update({"approved": False, "notes": ""}, 0)       # no notes: ends
+    assert "review_notes" not in review_update({"approved": True, "notes": "ok"}, 0)      # approved
+    assert "review_notes" not in review_update(
+        {"approved": False, "notes": "again"}, MAX_PLAN_REVISIONS
+    )
+
+
+def test_a_plan_sent_back_is_revised_with_the_notes_and_reviewed_again(tmp_path, monkeypatch):
+    """Through the real graph: gate, send back, revise with the notes, gate again."""
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.types import Command
+
+    from odoo_miner.agents import audit as audit_log
+    from odoo_miner.pipeline import graph as pipeline
+
+    requests = []
+
+    def fake_planner(run_dir, out, run="adhoc", feedback=None, agent=None):
+        requests.append(feedback)
+        decision = "customize" if feedback else "no_change"
+        plan = Plan(decision=decision, summary=f"plan {len(requests)}",
+                    module_name="demo_mod" if feedback else None)
+        Path(out).write_text(plan.model_dump_json())
+        (Path(run_dir) / "plan.md").write_text(f"# plan {len(requests)}\n")
+        return plan
+
+    monkeypatch.setattr(pipeline, "run_planner_path", fake_planner)
+    for stage in ("segment", "trace", "assess"):
+        monkeypatch.setitem(pipeline.NODES, stage, lambda state: {})
+    graph = pipeline.build_graph(checkpointer=InMemorySaver(), until="approve")
+    config = {"configurable": {"thread_id": "review"}}
+
+    first = graph.invoke({"run": "t", "run_dir": str(tmp_path)}, config)
+    assert first["__interrupt__"][0].value["decision"] == "no_change"
+
+    second = graph.invoke(Command(resume={"approved": False, "notes": "Policy: bill at PO terms."}), config)
+    assert second["__interrupt__"][0].value["decision"] == "customize"
+    assert requests == [None, "Policy: bill at PO terms."]
+    assert (tmp_path / "plan.rejected-1.json").exists() and (tmp_path / "plan.rejected-1.md").exists()
+
+    done = graph.invoke(Command(resume={"approved": True, "notes": "Matches the policy."}), config)
+    assert "__interrupt__" not in done
+    assert [e["outcome"] for e in audit_log.read() if e["action"] == "approve_plan"] == ["sent back", "approved"]
+
+
+def test_the_revision_request_carries_the_notes():
+    from odoo_miner.agents.planner import PLAN_PROMPT, revision_prompt
+
+    request = revision_prompt("Policy: bill at PO terms; log every change.")
+    assert request.startswith(PLAN_PROMPT)
+    assert "Policy: bill at PO terms; log every change." in request
+    assert "plan.rejected-" in request
+
+
+def test_approving_with_notes_hands_them_to_the_builder(tmp_path, monkeypatch):
+    """"Approve, and also do X" must reach the builder, not only the audit log."""
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.types import Command
+
+    from odoo_miner.agents import builder
+    from odoo_miner.agents.builder import BUILD_PROMPT, build_prompt
+    from odoo_miner.pipeline import graph as pipeline
+
+    def fake_planner(run_dir, out, run="adhoc", feedback=None, agent=None):
+        plan = Plan(decision="customize", summary="s", module_name="demo_mod")
+        Path(out).write_text(plan.model_dump_json())
+        return plan
+
+    built = []
+    monkeypatch.setattr(pipeline, "run_planner_path", fake_planner)
+    monkeypatch.setattr(builder, "run_builder_path",
+                        lambda run_dir, plan_path, out, run="adhoc", notes=None: built.append(notes))
+    for stage in ("segment", "trace", "assess"):
+        monkeypatch.setitem(pipeline.NODES, stage, lambda state: {})
+    graph = pipeline.build_graph(checkpointer=InMemorySaver())
+    config = {"configurable": {"thread_id": "approve-with-notes"}}
+
+    graph.invoke({"run": "t", "run_dir": str(tmp_path)}, config)
+    graph.invoke(Command(resume={"approved": True, "notes": "Refuse foreign-currency POs."}), config)
+    assert built == ["Refuse foreign-currency POs."]
+
+    assert build_prompt(None) == build_prompt("  ") == BUILD_PROMPT
+    request = build_prompt("Refuse foreign-currency POs.")
+    assert request.startswith(BUILD_PROMPT) and request.endswith("Refuse foreign-currency POs.")
 
 
 def test_errors_accumulate_rather_than_overwrite():
@@ -628,6 +721,17 @@ def test_citation_check_flags_missing_files_and_lines(fake_source):
     )
     assert any("nope.py does not exist" in p for p in problems)
     assert any(":999 is past the end" in p for p in problems)
+
+
+def test_citation_check_reads_paths_under_the_planners_mount(fake_source):
+    """The planner sees Odoo at `/odoo/` and often cites it that way; those must be checked too."""
+    from odoo_miner.agents.planner import check_citations
+
+    assert check_citations(
+        "`_prepare_invoice` (`/odoo/addons/purchase/models/purchase_order.py:12`)", root=fake_source
+    ) == []
+    [problem] = check_citations("(`/odoo/addons/purchase_order_line.py:140-150`)", root=fake_source)
+    assert problem == "addons/purchase_order_line.py does not exist."
 
 
 def test_unverified_citations_reach_the_plan_contract():

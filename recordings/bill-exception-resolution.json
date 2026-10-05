@@ -1,0 +1,618 @@
+{
+    "title": "bill-exception-resolution",
+    "steps": [
+        {
+            "type": "setViewport",
+            "width": 1365,
+            "height": 919,
+            "deviceScaleFactor": 1,
+            "isMobile": false,
+            "hasTouch": false,
+            "isLandscape": false
+        },
+        {
+            "type": "navigate",
+            "url": "http://localhost:8069/web/login?redirect=%2Fodoo%2Fbills",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "http://localhost:8069/web/login?redirect=%2Fodoo%2Fbills",
+                    "title": "Odoo"
+                }
+            ]
+        },
+        {
+            "type": "change",
+            "value": "admin",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Email"
+                ],
+                [
+                    "#login"
+                ],
+                [
+                    "xpath///*[@id=\"login\"]"
+                ],
+                [
+                    "pierce/#login"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "admin",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/Password Reset Password"
+                ],
+                [
+                    "#password"
+                ],
+                [
+                    "xpath///*[@id=\"password\"]"
+                ],
+                [
+                    "pierce/#password"
+                ]
+            ]
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "Enter",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "http://localhost:8069/odoo/bills",
+                    "title": "Odoo"
+                }
+            ]
+        },
+        {
+            "type": "keyUp",
+            "target": "main",
+            "key": "Enter"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "text/MF-88213"
+                ],
+                [
+                    "xpath///td[@name=\"ref\" and normalize-space()=\"MF-88213\"]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_source_purchase_orders]"
+                ],
+                [
+                    "text/P00004 Purchases"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_picking]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Draft Bill (MF-88213)\"]"
+                ],
+                [
+                    "text/Draft Bill (MF-88213)"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Chatter-logNote"
+                ],
+                [
+                    "xpath///button[normalize-space()=\"Log note\"]"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "Billed 4.35 against PO price 4.10; the increase was not agreed. Billing at the PO price.",
+            "target": "main",
+            "selectors": [
+                [
+                    "textarea.o-mail-Composer-input"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Composer-send"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "td[name=price_unit]"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "4.10",
+            "target": "main",
+            "selectors": [
+                [
+                    "td[name=price_unit] input"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_post]"
+                ],
+                [
+                    "text/Confirm"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Bills\"]"
+                ],
+                [
+                    "text/Bills"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "text/PPC-INV-1017"
+                ],
+                [
+                    "xpath///td[@name=\"ref\" and normalize-space()=\"PPC-INV-1017\"]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_source_purchase_orders]"
+                ],
+                [
+                    "text/P00005 Purchases"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_picking]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Draft Bill (PPC-INV-1017)\"]"
+                ],
+                [
+                    "text/Draft Bill (PPC-INV-1017)"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Chatter-logNote"
+                ],
+                [
+                    "xpath///button[normalize-space()=\"Log note\"]"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "Billed 1,000 but only 600 received; 400 are on backorder. Billing the received quantity.",
+            "target": "main",
+            "selectors": [
+                [
+                    "textarea.o-mail-Composer-input"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Composer-send"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "td[name=quantity]"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "600",
+            "target": "main",
+            "selectors": [
+                [
+                    "td[name=quantity] input"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_post]"
+                ],
+                [
+                    "text/Confirm"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Bills\"]"
+                ],
+                [
+                    "text/Bills"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "text/AGS-5520"
+                ],
+                [
+                    "xpath///td[@name=\"ref\" and normalize-space()=\"AGS-5520\"]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_source_purchase_orders]"
+                ],
+                [
+                    "text/P00006 Purchases"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_picking]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Draft Bill (AGS-5520)\"]"
+                ],
+                [
+                    "text/Draft Bill (AGS-5520)"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Chatter-logNote"
+                ],
+                [
+                    "xpath///button[normalize-space()=\"Log note\"]"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "Billed 200; 20 units failed incoming inspection and 180 were accepted. Billing the accepted quantity.",
+            "target": "main",
+            "selectors": [
+                [
+                    "textarea.o-mail-Composer-input"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Composer-send"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "td[name=quantity]"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "180",
+            "target": "main",
+            "selectors": [
+                [
+                    "td[name=quantity] input"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_post]"
+                ],
+                [
+                    "text/Confirm"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Bills\"]"
+                ],
+                [
+                    "text/Bills"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "text/MF-88240"
+                ],
+                [
+                    "xpath///td[@name=\"ref\" and normalize-space()=\"MF-88240\"]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_source_purchase_orders]"
+                ],
+                [
+                    "text/P00007 Purchases"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_view_picking]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Draft Bill (MF-88240)\"]"
+                ],
+                [
+                    "text/Draft Bill (MF-88240)"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Chatter-logNote"
+                ],
+                [
+                    "xpath///button[normalize-space()=\"Log note\"]"
+                ]
+            ]
+        },
+        {
+            "type": "change",
+            "value": "Expedite freight of 145.00 is not on PO P00007; removed from the bill and raised with the vendor.",
+            "target": "main",
+            "selectors": [
+                [
+                    "textarea.o-mail-Composer-input"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button.o-mail-Composer-send"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///tr[contains(@class,\"o_data_row\")][.//td[contains(normalize-space(), \"Expedite freight\")]]//button[@name=\"delete\"]"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "button[name=action_post]"
+                ],
+                [
+                    "text/Confirm"
+                ]
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "offsetX": 10,
+            "offsetY": 8,
+            "selectors": [
+                [
+                    "xpath///ol[contains(@class, \"breadcrumb\")]//a[normalize-space()=\"Bills\"]"
+                ],
+                [
+                    "text/Bills"
+                ]
+            ]
+        }
+    ]
+}

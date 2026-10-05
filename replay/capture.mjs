@@ -17,7 +17,8 @@ import { createRunner, parse, PuppeteerRunnerExtension, selectorToPElementSelect
 //   /web/dataset/call_kw/<model>/<method>      ORM calls (reads, writes, onchange)
 //   /web/dataset/call_button/<model>/<method>  object buttons (type="object")
 //   /web/action/load                           opening a menu/action
-const ODOO_RPC = /\/web\/dataset\/(call_kw|call_button)(\/|$)|\/web\/action\/load$/;
+//   /mail/message/post                         a message or note in a record's chatter
+const ODOO_RPC = /\/web\/dataset\/(call_kw|call_button)(\/|$)|\/web\/action\/load$|\/mail\/message\/post$/;
 
 const { values: opts } = parseArgs({
   options: {
@@ -55,6 +56,15 @@ function parseRpc(req) {
     if (url.pathname.endsWith('/web/action/load')) {
       call.method = 'action_load';
       call.kwargs = { action_id: p.action_id ?? null };
+    }
+    if (url.pathname.endsWith('/mail/message/post')) {
+      // Posting to the chatter writes a message on the record: record it as the
+      // message_post it is, not as nothing.
+      call.model = p.thread_model ?? null;
+      call.method = 'message_post';
+      call.args = p.thread_id != null ? [p.thread_id] : null;
+      const data = p.post_data ?? {};
+      call.kwargs = { message_type: data.message_type ?? null, subtype_xmlid: data.subtype_xmlid ?? null };
     }
   } catch {
     // Non-JSON body: keep what the URL gave us.

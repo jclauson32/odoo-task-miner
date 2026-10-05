@@ -66,8 +66,19 @@ def test_module_tests_pass_only_when_tests_actually_ran(monkeypatch, tmp_path, l
     result = odoo_ops.run_module_tests("demo_mod", run_dir=str(tmp_path))
     assert verdict in result
     assert (tmp_path / "tests.log").read_text() == log
-    # Installs if needed and updates if installed, so the tests run either way.
-    assert {"-i", "-u"} <= set(commands[0]) and "/demo_mod" in commands[0]
+    assert commands == [["bash", odoo_ops.TEST_SCRIPT, "demo_mod"]]
+
+
+def test_odoo_is_stopped_while_a_module_installs_or_tests():
+    """A running server loading the same database collided with the install
+    ("could not serialize access due to concurrent update") in a real build."""
+    for script in (odoo_ops.INSTALL_SCRIPT, odoo_ops.TEST_SCRIPT):
+        text = Path(script).read_text()
+        stop, run = text.index("docker compose stop odoo"), text.index("docker compose run --rm odoo odoo")
+        assert stop < run and "start odoo" in text and "wait_for_odoo.sh" in text, script
+        # Installs if needed and updates if installed, so it works either way.
+        assert '-i "$MODULE" -u "$MODULE"' in text, script
+    assert '--test-tags "/$MODULE"' in Path(odoo_ops.TEST_SCRIPT).read_text()
 
 
 # ----------------------------------------------------------------- replay
@@ -84,10 +95,8 @@ def test_replay_restores_then_installs_then_replays_with_secrets_restored(monkey
     def fake_run(cmd, **kw):
         if cmd[:2] == ["bash", odoo_ops.RESTORE_HOOK]:
             order.append("restore")
-        elif "-i" in cmd:
+        elif cmd == ["bash", odoo_ops.INSTALL_SCRIPT, "demo_mod"]:
             order.append("install")
-        elif cmd[:2] == ["docker", "compose"] and "restart" in cmd:
-            order.append("restart")
         elif "odoo_miner.cli" in cmd:
             order.append("replay")
             assert "--pre-hook" not in cmd, "a restore after the install would remove the module"
@@ -100,7 +109,7 @@ def test_replay_restores_then_installs_then_replays_with_secrets_restored(monkey
     result = odoo_ops.replay_workflow(str(after), str(out), module="demo_mod", original_recording=str(original))
 
     assert result.startswith("replay completed"), result
-    assert order == ["restore", "install", "restart", "replay"]
+    assert order == ["restore", "install", "replay"]
     assert REDACTED not in [s.get("value") for s in replayed["steps"]]
 
 

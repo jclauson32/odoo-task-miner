@@ -231,7 +231,7 @@ def show(
     first: int | None = typer.Option(None, "--from", help="First step number to show."),
     last: int | None = typer.Option(None, "--to", help="Last step number to show."),
 ):
-    """Print any pipeline file as a table: clicks, session, segments, traces, assessment or plan."""
+    """Print any pipeline file as a table: clicks, session, segments, traces, assessment, plan or build."""
     data = json.loads(path.read_text(encoding="utf-8"))
     for looks_like, render in _ARTIFACT_VIEWS:
         if looks_like(data):
@@ -424,7 +424,9 @@ def analyze(
     approve: bool | None = typer.Option(
         None, "--approve/--reject", help="Answer a pending approval and continue."
     ),
-    notes: str = typer.Option("", "--notes", help="Notes to record with the approval."),
+    notes: str = typer.Option(
+        "", "--notes", help="Notes for the record. With --reject, notes send the plan or action back to be revised."
+    ),
     restart: bool = typer.Option(
         False, "--restart", help="Start over instead of resuming an unfinished run on this thread."
     ),
@@ -489,10 +491,11 @@ def analyze(
         # Answer with the same --until the run used, so approving a plan that
         # proposes a module does not start a builder this run left out.
         scope = f"--until {until} " if until else ""
+        base = f"odoo-miner analyze {run_dir} {scope}--thread {thread_id}"
         console.print(
-            f"\nApprove with:  odoo-miner analyze {run_dir} {scope}--approve "
-            f"--thread {thread_id}\nReject with:   odoo-miner analyze {run_dir} {scope}--reject "
-            f"--thread {thread_id} --notes \"why\""
+            f"\nApprove:    {base} --approve"
+            f"\nSend back:  {base} --reject --notes \"what to change\"   (revised, then asks again)"
+            f"\nReject:     {base} --reject   (ends here)"
         )
         return
 
@@ -618,6 +621,28 @@ def _show_plan(data: dict, path: Path) -> None:
     _show_citation_check(data.get("unverified_citations") or [])
 
 
+def _show_build(data: dict, path: Path) -> None:
+    def status(ok: bool, good: str, bad: str) -> str:
+        return f"[green]{good}[/green]" if ok else f"[red]{bad}[/red]"
+
+    before, after = data.get("effort_before", 0), data.get("effort_after", 0)
+    change = f" ({(after - before) / before:+.0%})" if before else ""
+    table = Table(title=f"Build - {path}", show_header=False)
+    table.add_column(style="bold")
+    table.add_column(overflow="fold")
+    for label, value in [
+        ("Module tests", status(data.get("tests_passed", False), "passed", "not passing")),
+        ("Replay with the change", status(data.get("replay_completed", False), "completed", "did not complete")),
+        ("Effort", f"{before:g} → {after:g}{change}"),
+        ("Branch", escape(data.get("branch") or "-")),
+        ("Commit", escape(data.get("commit") or "-")),
+        ("Pull request", escape(data.get("pr_url") or "-")),
+        ("Report emailed", "yes" if data.get("email_sent") else "no"),
+    ]:
+        table.add_row(label, value)
+    console.print(table)
+
+
 def _is_segments(data: dict) -> bool:
     first = (data.get("segments") or [{}])[0]
     return "step_indexes" in first
@@ -630,6 +655,7 @@ def _is_traces(data: dict) -> bool:
 
 _ARTIFACT_VIEWS = [
     (lambda d: "decision" in d and "summary" in d, _show_plan),
+    (lambda d: "tests_passed" in d and "effort_before" in d, _show_build),
     (lambda d: "total_effort" in d, _show_assessment),
     (_is_traces, _show_traces),
     (_is_segments, _show_segments),
@@ -640,6 +666,7 @@ _ARTIFACT_VIEWS = [
 def audit(
     run_name: str | None = typer.Option(None, "--run", help="Only this run's entries."),
     last: int = typer.Option(20, "--last", help="How many of the most recent entries to show."),
+    full: bool = typer.Option(False, "--full", help="Show notes whole instead of their first 120 characters."),
 ):
     """Show the audit log: who approved or rejected what, and what was sent out."""
     from .agents.audit import audit_path, read
@@ -651,7 +678,7 @@ def audit(
     table = Table(title=f"Audit log - {audit_path()}")
     for column in ("When (UTC)", "Run", "Action", "Outcome", "Detail"):
         table.add_column(column, overflow="fold")
-    colors = {"approved": "green", "ok": "green", "rejected": "yellow", "refused": "red"}
+    colors = {"approved": "green", "ok": "green", "sent back": "yellow", "rejected": "yellow", "refused": "red"}
     for entry in entries:
         outcome = entry.get("outcome", "")
         color = colors.get(outcome, "white")
@@ -659,7 +686,7 @@ def audit(
         table.add_row(
             entry.get("at", "")[:19].replace("T", " "), entry.get("run", ""),
             entry.get("action", "").replace("approve_", "approve "),
-            f"[{color}]{escape(outcome)}[/{color}]", escape(str(detail)[:120]),
+            f"[{color}]{escape(outcome)}[/{color}]", escape(str(detail) if full else str(detail)[:120]),
         )
     console.print(table)
 

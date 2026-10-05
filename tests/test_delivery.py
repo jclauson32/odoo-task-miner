@@ -685,3 +685,17 @@ def test_audit_entries_carry_the_run_and_the_command_filters_by_it(monkeypatch):
     result = CliRunner().invoke(app, ["audit", "--run", "bills"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output
     assert "looks right" in result.output and "not this one" not in result.output
+
+
+def test_audit_shows_the_reasons_whole_when_asked(monkeypatch):
+    """Notes are the why of a decision; --full must not cut them."""
+    from typer.testing import CliRunner
+
+    from odoo_miner.cli import app
+
+    reason = "Sent back: " + "the payables policy decides this. " * 8 + "END-OF-NOTES"
+    audit.record("approve_plan", "sent back", notes=reason)
+    short = CliRunner().invoke(app, ["audit"], env={"COLUMNS": "400"})
+    whole = CliRunner().invoke(app, ["audit", "--full"], env={"COLUMNS": "400"})
+    assert "END-OF-NOTES" not in short.output
+    assert "END-OF-NOTES" in whole.output, whole.output

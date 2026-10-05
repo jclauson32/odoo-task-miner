@@ -16,9 +16,10 @@ from .config import chat_model, load_prompt, settings, trace_config
 from .contracts import Plan
 from .tools import odoo_source
 
-# `addons/x/y.py`, `addons/x/y.xml:56`, `odoo/addons/base/z.py:10-20`
+# `addons/x/y.py`, `addons/x/y.xml:56`, `odoo/addons/base/z.py:10-20`, and the
+# same paths as the planner sees them, under its `/odoo/` mount.
 _CITATION_RE = re.compile(
-    r"(?<![\w/])((?:odoo/)?addons/[\w./-]+?\.(?:py|xml))(?::(\d+)(?:-(\d+))?)?"
+    r"(?<![\w/])(?:/odoo/)?((?:odoo/)?addons/[\w./-]+?\.(?:py|xml))(?::(\d+)(?:-(\d+))?)?"
 )
 # A backticked identifier, written plainly or as a call: `name`, `Model._post()`.
 _IDENTIFIER_RE = re.compile(r"`([A-Za-z_][\w.]*)(?:\(\))?`")
@@ -108,8 +109,25 @@ def build_planner(run_dir: Path, model: str | None = None):
     )
 
 
-def run_planner(run_dir: Path, agent: Any = None, run: str = "adhoc") -> Plan:
-    """Plan a run. Expects segments/traces/assessment to be in `run_dir`."""
+def revision_prompt(feedback: str) -> str:
+    """The planning request when a reviewer has sent the previous plan back."""
+    return (
+        PLAN_PROMPT
+        + "\n\nA reviewer sent your previous plan back. Their notes:\n\n"
+        + feedback.strip()
+        + "\n\nThe rejected plan is in /run/ as plan.rejected-*.md and .json. Revise the plan "
+        "to address the notes - they may state a business policy you could not have known - "
+        "or, if you disagree, keep your position and explain why in the plan. Write /run/plan.md again."
+    )
+
+
+def run_planner(
+    run_dir: Path, agent: Any = None, run: str = "adhoc", feedback: str | None = None
+) -> Plan:
+    """Plan a run. Expects segments/traces/assessment to be in `run_dir`.
+
+    With `feedback`, this is a revision of a plan a reviewer sent back.
+    """
     run_dir = Path(run_dir)
     missing = [
         name for name in ("segments.json", "traces.json", "assessment.json")
@@ -121,9 +139,10 @@ def run_planner(run_dir: Path, agent: Any = None, run: str = "adhoc") -> Plan:
         )
 
     agent = agent or build_planner(run_dir)
+    request = revision_prompt(feedback) if feedback else PLAN_PROMPT
     result = agent.invoke(
-        {"messages": [{"role": "user", "content": PLAN_PROMPT}]},
-        config=trace_config(run, "planner"),
+        {"messages": [{"role": "user", "content": request}]},
+        config=trace_config(run, "planner", revision=bool(feedback)),
     )
     plan = result["structured_response"]
     if not isinstance(plan, Plan):
@@ -141,8 +160,10 @@ def run_planner(run_dir: Path, agent: Any = None, run: str = "adhoc") -> Plan:
     return plan.model_copy(update={"unverified_citations": problems})
 
 
-def run_planner_path(run_dir: Path, out: Path, agent: Any = None, run: str = "adhoc") -> Plan:
-    plan = run_planner(run_dir, agent=agent, run=run)
+def run_planner_path(
+    run_dir: Path, out: Path, agent: Any = None, run: str = "adhoc", feedback: str | None = None
+) -> Plan:
+    plan = run_planner(run_dir, agent=agent, run=run, feedback=feedback)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(plan.model_dump_json(indent=2), encoding="utf-8")

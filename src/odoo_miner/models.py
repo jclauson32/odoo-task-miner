@@ -48,6 +48,13 @@ class Click(BaseModel):
     page: OdooContext = Field(default_factory=OdooContext)
     navigates_to: str | None = None   # URL the step led to, from assertedEvents
 
+    def target_label(self) -> str:
+        """The most readable name for what the step acted on, or its URL."""
+        t = self.target
+        if not t:
+            return self.url or ""
+        return t.aria_label or t.text or t.button_name or t.css or ""
+
 
 RpcKind = Literal["read", "write", "compute", "action_load", "unknown"]
 

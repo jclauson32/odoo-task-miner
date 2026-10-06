@@ -65,7 +65,7 @@ def test_run_keeps_a_redacted_copy_of_its_recording(tmp_path):
 def test_module_tests_pass_only_when_tests_actually_ran(monkeypatch, tmp_path, log, verdict):
     """Tests pass only when Odoo reports at least one test and no failures."""
     commands = []
-    monkeypatch.setattr(odoo_ops, "_run", lambda cmd, **kw: (commands.append(cmd), (0, log))[1])
+    monkeypatch.setattr(odoo_ops, "_run", lambda cmd, **_kw: (commands.append(cmd), (0, log))[1])
     result = odoo_ops.run_module_tests("demo_mod", run_dir=str(tmp_path))
     assert verdict in result
     assert (tmp_path / "tests.log").read_text() == log
@@ -95,7 +95,7 @@ def test_replay_restores_then_installs_then_replays_with_secrets_restored(monkey
     out = tmp_path / "after"
     order, replayed = [], {}
 
-    def fake_run(cmd, **kw):
+    def fake_run(cmd, **_kw):
         """Record each command instead of running it."""
         if cmd[:2] == ["bash", odoo_ops.RESTORE_HOOK]:
             order.append("restore")

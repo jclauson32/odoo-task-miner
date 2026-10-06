@@ -21,7 +21,7 @@ from email.utils import formatdate, make_msgid, parseaddr
 from pathlib import Path
 
 from .. import audit
-from ..config import settings
+from ..config import settings, truthy
 
 PROTECTED_BRANCHES = frozenset({"main", "master"})
 MODULE_NAME_RE = re.compile(r"[a-z][a-z0-9_]{0,62}")
@@ -272,11 +272,6 @@ def _open_pr(module: str, title: str, body: str, repo_dir: str | None) -> str:
 # ----------------------------------------------------------------- email
 
 
-def _truthy(value: str | None) -> bool:
-    """Whether an environment value means "on"."""
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def send_report_email(subject: str, body: str, attachments: list[str] | None = None) -> str:
     """Email a report to the configured address, with files attached.
 
@@ -385,7 +380,7 @@ def _send(subject: str, body: str, attachments: list[str]) -> str:
     if not host:
         return "not sent: SMTP_HOST is not set."
 
-    use_ssl = _truthy(os.environ.get("SMTP_SSL"))
+    use_ssl = truthy(os.environ.get("SMTP_SSL"))
     raw_port = (os.environ.get("SMTP_PORT") or "").strip()
     try:
         port = int(raw_port) if raw_port else (465 if use_ssl else 587)

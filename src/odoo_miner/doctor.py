@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .agents.config import settings, truthy
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SECRET_WORDS = ("KEY", "PASSWORD", "TOKEN", "SECRET")
 
@@ -41,11 +43,6 @@ def _run(cmd: list[str], timeout: int = 15) -> tuple[int, str]:
     return result.returncode, (result.stdout or "") + (result.stderr or "")
 
 
-def _truthy(value: str | None) -> bool:
-    """Whether an environment value means "on"."""
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def check_python() -> Check:
     """The Python version; pyproject already requires 3.11 or newer."""
     return Check("ok", "Python", ".".join(map(str, sys.version_info[:3])))
@@ -53,8 +50,6 @@ def check_python() -> Check:
 
 def check_anthropic() -> Check:
     """The Anthropic API key is set."""
-    from .agents.config import settings
-
     s = settings()
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return Check("fail", "Anthropic API key", "ANTHROPIC_API_KEY is not set",
@@ -64,7 +59,7 @@ def check_anthropic() -> Check:
 
 def check_langsmith() -> Check:
     """LangSmith tracing is on and has a key."""
-    if not _truthy(os.environ.get("LANGSMITH_TRACING")):
+    if not truthy(os.environ.get("LANGSMITH_TRACING")):
         return Check("warn", "LangSmith tracing", "off", "Set LANGSMITH_TRACING=true to trace runs.")
     if not os.environ.get("LANGSMITH_API_KEY"):
         return Check("fail", "LangSmith tracing", "on, but LANGSMITH_API_KEY is not set",
@@ -74,8 +69,6 @@ def check_langsmith() -> Check:
 
 def check_odoo() -> Check:
     """Odoo answers its health check."""
-    from .agents.config import settings
-
     url = f"{settings().odoo_url}/web/health"
     try:
         with urllib.request.urlopen(url, timeout=5) as response:
@@ -89,8 +82,6 @@ def check_odoo() -> Check:
 
 def check_databases() -> Check:
     """The demo database and its snapshot exist."""
-    from .agents.config import settings
-
     db = settings().odoo_db
     code, out = _run(["docker", "compose", "exec", "-T", "db", "psql", "-U", "odoo", "-d", "postgres",
                       "-tAc", f"SELECT datname FROM pg_database WHERE datname IN ('{db}', '{db}_snapshot')"])
@@ -108,8 +99,6 @@ def check_databases() -> Check:
 
 def check_source() -> Check:
     """Odoo's source checkout is there for the tracer and planner."""
-    from .agents.config import settings
-
     root = settings().odoo_source_abs
     if (root / "addons" / "purchase").is_dir():
         return Check("ok", "Odoo source", str(settings().odoo_source))
@@ -135,7 +124,7 @@ def check_email() -> Check:
         return Check("warn", "Email", "REPORT_EMAIL_TO or SMTP_HOST not set; reports will not send",
                      "Fill the SMTP_* settings in .env.")
     port = (os.environ.get("SMTP_PORT") or "").strip()
-    ssl_on = _truthy(os.environ.get("SMTP_SSL"))
+    ssl_on = truthy(os.environ.get("SMTP_SSL"))
     if ssl_on and port in {"25", "587"}:
         return Check("fail", "Email", f"SMTP_SSL is on but SMTP_PORT is {port}, a STARTTLS port",
                      "Use port 465 with SMTP_SSL=true, or SMTP_SSL=false.")
@@ -185,8 +174,6 @@ CHECKS = [
 
 def run_checks() -> list[Check]:
     """Run every check; one that crashes is reported as a failure."""
-    from .agents.config import settings
-
     settings()  # load .env the way the stages do
     results = []
     for check in CHECKS:

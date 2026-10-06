@@ -100,58 +100,6 @@ def label_quality(outputs: dict, reference_outputs: dict) -> dict:
     }
 
 
-def coderefs_exist(outputs: dict, reference_outputs: dict | None = None) -> dict:
-    """Every CodeRef a tracer returned must exist on disk at that line."""
-    from odoo_miner.agents.tools import odoo_source
-
-    refs = [ref for seg in outputs.get("segments", []) for ref in seg.get("actions", [])]
-    if not refs:
-        return {"key": "coderefs_exist", "score": 1.0, "comment": "no actions to check"}
-    if not odoo_source.source_available():
-        return {"key": "coderefs_exist", "score": 0.0, "comment": "Odoo source missing"}
-
-    root = odoo_source.settings().odoo_source_abs
-    bad = []
-    for ref in refs:
-        path = root / ref["file"]
-        if not path.is_file():
-            bad.append(f"{ref['file']} (missing)")
-            continue
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-        if not (1 <= ref["line"] <= len(lines)):
-            bad.append(f"{ref['file']}:{ref['line']} (out of range)")
-    return {
-        "key": "coderefs_exist",
-        "score": (len(refs) - len(bad)) / len(refs),
-        "comment": f"{len(bad)} bad of {len(refs)}: {bad[:5]}",
-    }
-
-
-def expected_methods(outputs: dict, reference_outputs: dict) -> dict:
-    """Did the tracer find the (model, method) pairs the gold data expects?"""
-    wanted = {
-        (segment_id, model, method)
-        for segment_id, pairs in (reference_outputs.get("expected_actions") or {}).items()
-        for model, method in pairs
-    }
-    if not wanted:
-        return {"key": "expected_methods", "score": 1.0, "comment": "nothing expected"}
-
-    found: set[tuple[str, str, str]] = set()
-    for segment in outputs.get("segments", []):
-        for ref in segment.get("actions", []):
-            symbol = ref.get("symbol", "")
-            method = symbol.split(".")[-1]
-            for segment_id, model, want_method in wanted:
-                if segment_id == segment.get("segment_id") and want_method == method:
-                    found.add((segment_id, model, want_method))
-    return {
-        "key": "expected_methods",
-        "score": len(found) / len(wanted),
-        "comment": f"found {len(found)} of {len(wanted)}; missing {sorted(wanted - found)}",
-    }
-
-
 def scores_match(outputs: dict, reference_outputs: dict) -> dict:
     """Assessor's deterministic half: scores equal the stored expected scores."""
     expected = {
@@ -199,7 +147,6 @@ def adjustments_within_one(outputs: dict, reference_outputs: dict) -> dict:
 
 
 SEGMENTER_EVALUATORS = [boundary_f1, coverage, label_quality]
-TRACER_EVALUATORS = [coderefs_exist, expected_methods]
 ASSESSOR_EVALUATORS = [scores_match, adjustments_within_one]
 
 

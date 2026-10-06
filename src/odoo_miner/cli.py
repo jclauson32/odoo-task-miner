@@ -263,8 +263,7 @@ def show(
         table.add_column("Backend calls", overflow="fold")
 
     for c in clicks:
-        t = c.target
-        target = (t.aria_label or t.text or t.button_name or t.css or "") if t else (c.url or "")
+        target = c.target_label()
         row = [str(c.step_index), c.type, escape(target[:50]), escape((c.value or c.key or "")[:30])]
         if show_screen:
             row.append(escape(screen(c)))

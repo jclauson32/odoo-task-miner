@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "odoo-miner"
 version = "0.1.0"
-description = "Turn Chrome DevTools Recorder sessions of Odoo workflows into structured click and backend-call data for analysis agents."
+description = "Record how people work in Odoo, capture the backend call behind every click, and let agents find the friction and plan changes."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,7 +22,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = [
+    "pytest>=8",
+    "aiosmtpd>=1.4.6",                  # a local SMTP server for the email tests
+    "ruff>=0.16.10",
+    "langgraph-cli[inmem]>=0.4.32",     # `langgraph dev`, for LangGraph Studio
+]
 
 [project.scripts]
 odoo-miner = "odoo_miner.cli:app"
@@ -33,13 +38,6 @@ packages = ["src/odoo_miner"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["evals"]
-
-[dependency-groups]
-dev = [
-    "aiosmtpd>=1.4.6",
-    "langgraph-cli[inmem]>=0.4.32",
-    "ruff>=0.16.10",
-]
 
 [tool.ruff]
 line-length = 110

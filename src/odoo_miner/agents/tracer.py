@@ -143,8 +143,7 @@ def render_segment(segment, clicks: list[SessionClick], refs: list[CodeRef], que
         "Steps:",
     ]
     for click in clicks:
-        target = (click.target.aria_label or click.target.text or click.target.button_name
-                  or click.target.css or "") if click.target else (click.url or "")
+        target = click.target_label()
         calls = ", ".join(
             f"{c.kind} {c.model or '-'}.{c.method or '-'}" for c in click.calls
         ) or "-"

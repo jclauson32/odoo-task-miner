@@ -423,10 +423,11 @@ Add `langgraph.json` so `langgraph dev` opens the graph in LangGraph Studio
 (good for the demo):
 
 ```json
-{ "dependencies": ["."], "graphs": { "odoo_miner": "src/odoo_miner/pipeline/graph.py:graph" }, "env": ".env" }
+{ "dependencies": ["."], "graphs": { "odoo_miner": "src/odoo_miner/pipeline/studio.py:graph" }, "env": ".env" }
 ```
 
-(`graph` there is a module-level compiled graph; Studio supplies its own persistence.)
+(The server loads `studio.py` by path, outside the package, so it imports the
+pipeline absolutely and compiles it without a checkpointer; Studio supplies its own.)
 
 **CLI:** `odoo-miner analyze out/<run> [--until assess]`
 

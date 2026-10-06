@@ -1,8 +1,7 @@
 """Shared state for the analysis pipeline.
 
-File paths travel in the state, not whole documents: checkpoints stay small
-and every intermediate result stays on disk where it can be inspected or a
-single stage re-run.
+The state carries file paths rather than documents, so checkpoints stay small
+and every stage's output stays on disk.
 """
 
 from __future__ import annotations
@@ -11,11 +10,13 @@ from typing import Annotated, TypedDict
 
 
 def _extend(left: list | None, right: list | None) -> list:
-    """Reducer so nodes can append errors without clobbering each other."""
+    """Reducer that appends errors from each node instead of replacing them."""
     return (left or []) + (right or [])
 
 
 class PipelineState(TypedDict, total=False):
+    """What the pipeline passes from one node to the next."""
+
     run: str                      # run name, used in LangSmith metadata
     run_dir: str
     session_path: str
@@ -25,7 +26,7 @@ class PipelineState(TypedDict, total=False):
     plan_path: str
     decision: str                 # the plan's decision; only "customize" is built
     approval: dict                # {"approved": bool, "notes": str}
-    review_notes: str             # a reviewer's notes on a plan sent back, for the revision
+    review_notes: str             # notes from a reviewer who sent the plan back
     plan_revisions: int           # how many times the plan has been sent back
     build_path: str
     errors: Annotated[list[str], _extend]

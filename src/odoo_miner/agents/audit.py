@@ -1,11 +1,7 @@
-"""Append-only audit log for human decisions and outward actions.
+"""Append-only audit log of approvals and outward actions.
 
-Every plan approval, every tool approval, and every action that leaves the
-machine (a push, a pull request, an email) is appended here as one JSON line:
-when, who, what, and how it turned out. Nothing in the code rewrites or
-deletes the file.
-
-The location is `ODOO_MINER_AUDIT_LOG`, default `out/audit.jsonl`.
+Each approval, push, pull request and email is one JSON line: when, who, what
+and the outcome. The file is `ODOO_MINER_AUDIT_LOG`, `out/audit.jsonl` by default.
 """
 
 from __future__ import annotations
@@ -23,6 +19,7 @@ DEFAULT_PATH = Path("out") / "audit.jsonl"
 
 
 def audit_path() -> Path:
+    """Where the audit log is written."""
     return Path(os.environ.get("ODOO_MINER_AUDIT_LOG") or DEFAULT_PATH)
 
 
@@ -46,7 +43,7 @@ def record(action: str, outcome: str, **details: Any) -> None:
         "actor": actor(),
         "action": action,
         "outcome": outcome,
-        # The run this happened in, so one run's trail can be read on its own.
+        # The run it happened in, so one run's entries can be read on their own.
         "run": os.environ.get("ODOO_MINER_RUN") or None,
         **{key: value for key, value in details.items() if value is not None},
     }

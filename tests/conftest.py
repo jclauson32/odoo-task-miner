@@ -1,9 +1,8 @@
 """Shared test setup.
 
 The project's `.env` holds real SMTP credentials and turns LangSmith tracing
-on, and `config.settings()` loads it into the process. This fixture makes
-sure no test can send a real email, push to a real remote, write to the real
-audit log, or send a trace.
+on. The fixture below keeps every test from sending email, pushing, writing the
+real audit log or sending a trace.
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ DELIVERY_ENV = (
 
 @pytest.fixture(autouse=True)
 def no_outward_side_effects(monkeypatch, tmp_path):
+    """Blank the email settings; point tracing, git and the audit log somewhere harmless."""
     # Blank rather than delete: python-dotenv never overrides a variable that
     # is already set, so a blank one stays blank even if .env loads later.
     for name in DELIVERY_ENV:

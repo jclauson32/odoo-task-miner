@@ -1,8 +1,7 @@
 """Pre-flight checks: is this machine ready to record, replay and analyze?
 
-`odoo-miner doctor` runs every check and says what to do about each failure.
-Nothing here changes anything; it only looks. Secrets are reported as set or
-missing, never printed.
+`odoo-miner doctor` runs every check and says how to fix each failure. The
+checks only read; secrets are reported as set or missing, never printed.
 """
 
 from __future__ import annotations
@@ -25,6 +24,8 @@ Status = Literal["ok", "warn", "fail"]
 
 @dataclass
 class Check:
+    """The result of one check, with a fix when it is not ok."""
+
     status: Status
     name: str
     detail: str
@@ -32,6 +33,7 @@ class Check:
 
 
 def _run(cmd: list[str], timeout: int = 15) -> tuple[int, str]:
+    """Run a command from the repository root; return its exit code and output."""
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=REPO_ROOT)
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
@@ -40,15 +42,17 @@ def _run(cmd: list[str], timeout: int = 15) -> tuple[int, str]:
 
 
 def _truthy(value: str | None) -> bool:
+    """Whether an environment value means "on"."""
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def check_python() -> Check:
-    # pyproject's requires-python already refuses anything older than 3.11.
+    """The Python version; pyproject already requires 3.11 or newer."""
     return Check("ok", "Python", ".".join(map(str, sys.version_info[:3])))
 
 
 def check_anthropic() -> Check:
+    """The Anthropic API key is set."""
     from .agents.config import settings
 
     s = settings()
@@ -59,6 +63,7 @@ def check_anthropic() -> Check:
 
 
 def check_langsmith() -> Check:
+    """LangSmith tracing is on and has a key."""
     if not _truthy(os.environ.get("LANGSMITH_TRACING")):
         return Check("warn", "LangSmith tracing", "off", "Set LANGSMITH_TRACING=true to trace runs.")
     if not os.environ.get("LANGSMITH_API_KEY"):
@@ -68,6 +73,7 @@ def check_langsmith() -> Check:
 
 
 def check_odoo() -> Check:
+    """Odoo answers its health check."""
     from .agents.config import settings
 
     url = f"{settings().odoo_url}/web/health"
@@ -82,6 +88,7 @@ def check_odoo() -> Check:
 
 
 def check_databases() -> Check:
+    """The demo database and its snapshot exist."""
     from .agents.config import settings
 
     db = settings().odoo_db
@@ -100,6 +107,7 @@ def check_databases() -> Check:
 
 
 def check_source() -> Check:
+    """Odoo's source checkout is there for the tracer and planner."""
     from .agents.config import settings
 
     root = settings().odoo_source_abs
@@ -111,6 +119,7 @@ def check_source() -> Check:
 
 
 def check_replay() -> Check:
+    """Node and the replay's dependencies are installed."""
     if shutil.which("node") is None:
         return Check("fail", "Replay", "node is not on PATH", "Install Node.js 18 or newer.")
     if not (REPO_ROOT / "replay" / "node_modules").is_dir():
@@ -120,6 +129,7 @@ def check_replay() -> Check:
 
 
 def check_email() -> Check:
+    """The SMTP settings are complete and consistent."""
     to, host = os.environ.get("REPORT_EMAIL_TO"), os.environ.get("SMTP_HOST")
     if not to or not host:
         return Check("warn", "Email", "REPORT_EMAIL_TO or SMTP_HOST not set; reports will not send",
@@ -133,6 +143,7 @@ def check_email() -> Check:
 
 
 def check_github() -> Check:
+    """The GitHub CLI is installed and logged in."""
     if shutil.which("gh") is None:
         return Check("warn", "GitHub CLI", "gh is not installed; pull requests cannot be opened",
                      "Install the GitHub CLI and run gh auth login.")
@@ -145,7 +156,7 @@ def check_github() -> Check:
 
 
 def check_shadowed() -> Check:
-    """Variables exported in the shell beat .env; say so when they differ."""
+    """Shell variables that override a different value in .env."""
     try:
         from dotenv import dotenv_values
     except ImportError:
@@ -173,9 +184,10 @@ CHECKS = [
 
 
 def run_checks() -> list[Check]:
+    """Run every check; one that crashes is reported as a failure."""
     from .agents.config import settings
 
-    settings()  # load .env first, exactly as the stages do
+    settings()  # load .env the way the stages do
     results = []
     for check in CHECKS:
         try:

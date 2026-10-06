@@ -1,3 +1,5 @@
+"""Tests for the recording pipeline: URLs, ingest, merge, the CLI and secrets."""
+
 import json
 from pathlib import Path
 
@@ -17,12 +19,14 @@ NETWORK = FIXTURES / "vendor_bill_network.json"
 
 @pytest.fixture
 def log() -> ClickLog:
+    """The vendor-bill fixture recording, parsed."""
     return load_recording(RECORDING)
 
 
 # --- URL parsing -----------------------------------------------------------
 
 def test_legacy_hash_url():
+    """Hash-style URLs give the model, record, action, view and menu."""
     ctx = parse_odoo_url("http://x/web#id=1042&action=245&model=account.move&view_type=form&menu_id=115")
     assert (ctx.model, ctx.record_id, ctx.action, ctx.view_type, ctx.menu_id) == (
         "account.move", 1042, "245", "form", 115
@@ -30,58 +34,69 @@ def test_legacy_hash_url():
 
 
 def test_new_path_url_with_action():
+    """/odoo/action-<id>/<record> is a form view of that record."""
     ctx = parse_odoo_url("http://x/odoo/action-388/77")
     assert ctx.action == "388" and ctx.record_id == 77 and ctx.view_type == "form"
 
 
 def test_new_path_url_with_model():
+    """/odoo/<model>/<record> names the model."""
     ctx = parse_odoo_url("http://x/odoo/stock.picking/311")
     assert ctx.model == "stock.picking" and ctx.record_id == 311
 
 
 def test_new_path_action_path_list_view():
+    """An action path without a record is not a form view."""
     ctx = parse_odoo_url("http://x/odoo/purchase")
     assert ctx.action == "purchase" and ctx.record_id is None and ctx.view_type is None
 
 
 def test_new_path_breadcrumb_stack_uses_last_screen():
+    """Only the last screen in the breadcrumb stack counts."""
     ctx = parse_odoo_url("http://x/odoo/action-245/1042/action-388/77")
     assert ctx.action == "388" and ctx.record_id == 77 and ctx.model is None
 
 
 def test_new_path_model_without_dot_and_new_record():
+    """m-<model> names a model, and new opens a form."""
     ctx = parse_odoo_url("http://x/odoo/m-website/new")
     assert ctx.model == "website" and ctx.record_id is None and ctx.view_type == "form"
 
 
 def test_new_path_xmlid_action():
+    """An action can be named by its XML id."""
     ctx = parse_odoo_url("http://x/odoo/action-account.action_move_in_invoice_type/5")
     assert ctx.action == "account.action_move_in_invoice_type" and ctx.record_id == 5
 
 
 def test_empty_url():
+    """No URL gives an empty context."""
     assert parse_odoo_url(None).model is None
 
 
 # --- Recorder parsing ------------------------------------------------------
 
 def test_drops_setup_and_keyup(log):
+    """Viewport setup and keyUp steps are dropped."""
     types = [c.type for c in log.clicks]
     assert "setViewport" not in types and "keyUp" not in types
     assert len(log.clicks) == 10
 
 
 def test_keep_noise_keeps_keyup():
+    """keep_noise keeps the keyUp steps."""
     data = json.loads(RECORDING.read_text())
     assert "keyUp" in [c.type for c in parse_recording(data, keep_noise=True).clicks]
 
 
 def test_step_index_matches_original_recording(log):
+    """Steps keep their index in the original recording."""
     confirm = log.clicks[-1]
     assert confirm.step_index == 11  # index in the raw recording, used to join replay data
 
 
 def test_target_extraction(log):
+    """Labels, text and button names are read from the selectors."""
     confirm = log.clicks[-1].target
     assert confirm.aria_label == "Confirm"
     assert confirm.button_name == "action_post"
@@ -95,6 +110,7 @@ def test_target_extraction(log):
 
 
 def test_page_context_follows_navigation(log):
+    """Each step knows which screen it happened on."""
     open_bill = log.clicks[1]
     assert open_bill.page.view_type == "list"           # clicked from the list
     assert open_bill.navigates_to.endswith("view_type=form&menu_id=115")
@@ -111,6 +127,7 @@ def test_page_context_follows_navigation(log):
 
 
 def test_rejects_non_recording():
+    """A file without steps is not a recording."""
     with pytest.raises(RecordingError):
         parse_recording({"foo": "bar"})
 
@@ -118,6 +135,7 @@ def test_rejects_non_recording():
 # --- Merge -----------------------------------------------------------------
 
 def test_merge_attaches_and_classifies(log):
+    """Calls attach to their steps and get a kind."""
     network = NetworkLog.model_validate_json(NETWORK.read_text())
     session = merge(log, network)
 
@@ -137,6 +155,7 @@ def test_merge_attaches_and_classifies(log):
 
 
 def test_merge_without_network(log):
+    """Without a replay, no step has calls."""
     session = merge(log, None)
     assert session.replay_completed is None
     assert all(c.calls == [] for c in session.clicks)
@@ -148,6 +167,7 @@ runner = CliRunner()
 
 
 def test_cli_ingest_merge_show(tmp_path):
+    """ingest, merge and show work end to end."""
     clicks = tmp_path / "clicks.json"
     session = tmp_path / "session.json"
 
@@ -164,12 +184,14 @@ def test_cli_ingest_merge_show(tmp_path):
 
 
 def test_cli_run_skip_replay(tmp_path):
+    """run --skip-replay writes clicks.json and session.json."""
     r = runner.invoke(app, ["run", str(RECORDING), "-d", str(tmp_path), "--skip-replay"])
     assert r.exit_code == 0, r.output
     assert (tmp_path / "clicks.json").exists() and (tmp_path / "session.json").exists()
 
 
 def test_cli_bad_input(tmp_path):
+    """Invalid JSON exits with an error."""
     bad = tmp_path / "bad.json"
     bad.write_text("{not json")
     r = runner.invoke(app, ["ingest", str(bad)])
@@ -177,6 +199,7 @@ def test_cli_bad_input(tmp_path):
 
 
 def test_cli_replay_missing_script(tmp_path):
+    """A missing replay script exits with an error."""
     r = runner.invoke(app, ["replay", str(RECORDING), "--script", str(tmp_path / "nope.mjs")])
     assert r.exit_code == 1
 
@@ -189,6 +212,7 @@ REAL = FIXTURES / "rfq_expedite_freight.json"
 
 
 def test_real_recording_skips_new_tab_and_keeps_indexes():
+    """The new-tab step is skipped and indexes stay the recording's."""
     log = load_recording(REAL)
     assert all(not (c.url or "").startswith("chrome://") for c in log.clicks)
     first = log.clicks[0]
@@ -198,12 +222,14 @@ def test_real_recording_skips_new_tab_and_keeps_indexes():
 
 
 def test_real_recording_page_context():
+    """The page URL follows the redirect after login."""
     log = load_recording(REAL)
     after_login = next(c for c in log.clicks if c.step_index == 9)
     assert after_login.page_url == "http://localhost:8069/odoo"
 
 
 def test_aria_label_walks_out_of_icon_chains():
+    """A click on an icon is named after the button around it."""
     log = load_recording(REAL)
     by_step = {c.step_index: c for c in log.clicks}
     assert by_step[14].target.aria_label == "Save manually"     # icon inside the save button
@@ -213,6 +239,7 @@ def test_aria_label_walks_out_of_icon_chains():
 
 
 def test_show_numbers_rows_by_recording_step_and_filters_a_range(tmp_path):
+    """show numbers rows by recording step; --from and --to filter them."""
     out = tmp_path / "clicks.json"
     runner.invoke(app, ["ingest", str(REAL), "-o", str(out)])
     r = runner.invoke(app, ["show", str(out), "--from", "27", "--to", "27"], env={"COLUMNS": "200"})
@@ -222,6 +249,7 @@ def test_show_numbers_rows_by_recording_step_and_filters_a_range(tmp_path):
 
 
 def test_show_does_not_eat_brackets(tmp_path):
+    """Square brackets in labels print as text, not markup."""
     out = tmp_path / "clicks.json"
     runner.invoke(app, ["ingest", str(REAL), "-o", str(out)])
     r = runner.invoke(app, ["show", str(out)], env={"COLUMNS": "200"})
@@ -234,10 +262,12 @@ GOLD_SEGMENTS = Path(__file__).resolve().parents[1] / "evals" / "datasets" / "rf
 
 
 def _show(path, columns="200"):
+    """Run show on a file at a fixed terminal width."""
     return runner.invoke(app, ["show", str(path)], env={"COLUMNS": columns})
 
 
 def test_show_renders_segments():
+    """Segments show with their outcomes."""
     r = _show(GOLD_SEGMENTS)
     assert r.exit_code == 0, r.output
     assert "Confirm the bill and hit the missing bill date error" in r.output
@@ -245,6 +275,7 @@ def test_show_renders_segments():
 
 
 def test_show_renders_traces(tmp_path):
+    """Traces show their code references."""
     traces = tmp_path / "traces.json"
     traces.write_text(json.dumps({"session": "s", "segments": [{
         "segment_id": "s07", "kind": "action", "retrievals": [],
@@ -258,6 +289,7 @@ def test_show_renders_traces(tmp_path):
 
 
 def test_show_renders_assessment_and_plan(tmp_path):
+    """Assessments show effort and friction; plans show the citation check."""
     assessment = tmp_path / "assessment.json"
     assessment.write_text(json.dumps({"session": "s", "total_effort": 5, "segments": [{
         "segment_id": "s10", "effort": 5, "friction": ["error: bill date required"],
@@ -279,6 +311,7 @@ def test_show_renders_assessment_and_plan(tmp_path):
 
 
 def test_show_renders_a_build(tmp_path):
+    """A build shows effort before and after, and its delivery."""
     build = tmp_path / "build.json"
     build.write_text(json.dumps({
         "branch": "feat/demo_mod", "pr_url": "https://github.com/o/r/pull/2",
@@ -305,24 +338,24 @@ def test_passwords_typed_in_a_recording_are_redacted_at_ingest():
     [["input[type='password']"]], [["#pwd"]], [["aria/API key"]], [["[name='otp']"]],
 ])
 def test_secret_fields_are_recognised(selectors):
-    from odoo_miner.recorder import parse_recording
-
+    """Password, API key and one-time code fields are redacted."""
     log = parse_recording({"steps": [{"type": "change", "value": "hunter2", "selectors": selectors}]})
     assert log.clicks[0].value == "<redacted>"
 
 
 def test_ordinary_fields_are_not_redacted():
-    from odoo_miner.recorder import parse_recording
-
+    """Ordinary values are kept as typed."""
     log = parse_recording({"steps": [{"type": "change", "value": "12.50", "selectors": [["aria/Sales Price"]]}]})
     assert log.clicks[0].value == "12.50"
 
 
 def test_smart_buttons_that_open_records_are_navigation_not_writes():
+    """action_view_* buttons only navigate; other buttons write."""
     from odoo_miner.merge import classify
     from odoo_miner.models import NetworkCall
 
-    def call(method, endpoint="/web/dataset/call_button/purchase.order/" + "x"):
+    def call(method, endpoint="/web/dataset/call_button/purchase.order/x"):
+        """A call to `method` through the button endpoint."""
         return NetworkCall(step_index=1, timestamp_ms=0, endpoint=endpoint, model="purchase.order", method=method)
 
     assert classify(call("action_view_picking")) == "action_load"

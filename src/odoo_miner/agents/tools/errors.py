@@ -1,13 +1,8 @@
-"""Turn a tool's failure into a message the model can read and act on.
+"""Report a tool's failure to the model instead of ending the run.
 
-An exception raised inside a tool propagates out of the agent and ends the
-run - for the builder, possibly half an hour of work - over something as
-small as a mistyped path. Wrapped tools return the error as text instead, so
-the model can correct itself.
-
-LangGraph's control-flow signals are exceptions too (an approval pause is a
-GraphInterrupt, which subclasses Exception). They are re-raised untouched:
-swallowing one would silently remove a human gate.
+LangGraph's control-flow signals are re-raised untouched: an approval pause is
+a GraphInterrupt, which subclasses Exception, and swallowing it would remove a
+human gate.
 """
 
 from __future__ import annotations
@@ -20,10 +15,11 @@ from langgraph.errors import GraphBubbleUp
 
 
 def reports_errors(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """`fn`, returning "error: ..." instead of raising. Name, signature and docstring are kept."""
+    """Wrap `fn` to return "error: ..." instead of raising, keeping its name and docstring."""
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        """Call `fn`, returning an exception as an error message."""
         try:
             return fn(*args, **kwargs)
         except GraphBubbleUp:

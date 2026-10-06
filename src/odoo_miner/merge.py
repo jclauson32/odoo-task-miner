@@ -1,8 +1,7 @@
 """Attach captured backend calls to the clicks that triggered them.
 
-Also gives each call a first-pass `kind` (read / write / compute / action_load).
-This is a deterministic hint for tracer_agent, not a final answer: Odoo modules
-can define any method name, so anything unrecognized is left as "unknown".
+Each call also gets a first-pass `kind` from its method name. Odoo modules can
+name methods anything, so unrecognized ones stay "unknown".
 """
 
 from __future__ import annotations
@@ -23,13 +22,13 @@ WRITE_METHODS = {
     "action_archive", "action_unarchive", "message_post",
 }
 WRITE_PREFIXES = ("action_", "button_")
-# Odoo's convention for smart buttons: action_view_* opens related records and
-# returns an action; it changes nothing. Checked before the write rules, which
-# would otherwise count every such hop as a write.
+# Smart buttons (action_view_*) only open related records. Checked before the
+# write rules, which would count them as writes.
 NAVIGATION_PREFIXES = ("action_view_",)
 
 
 def classify(call: NetworkCall) -> str:
+    """The kind of a call: read, write, compute, action_load or unknown."""
     endpoint = call.endpoint or ""
     method = call.method or ""
 
@@ -47,6 +46,7 @@ def classify(call: NetworkCall) -> str:
 
 
 def merge(clicks: ClickLog, network: NetworkLog | None) -> Session:
+    """Combine a click log and a network log into a session."""
     by_step: dict[int, list[NetworkCall]] = defaultdict(list)
     unattributed: list[NetworkCall] = []
     step_indexes = {c.step_index for c in clicks.clicks}
@@ -57,7 +57,7 @@ def merge(clicks: ClickLog, network: NetworkLog | None) -> Session:
             if call.step_index in step_indexes:
                 by_step[call.step_index].append(call)
             else:
-                # Before the first step, or during a step ingest dropped (e.g. setViewport).
+                # Before the first step, or during a step that ingest dropped.
                 unattributed.append(call)
 
     session_clicks = []

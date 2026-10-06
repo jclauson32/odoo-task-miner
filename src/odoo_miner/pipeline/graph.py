@@ -1,8 +1,7 @@
 """The analysis pipeline as a LangGraph StateGraph.
 
-Fixed order of stages, typed shared state, resumable runs, and a human
-approval gate between planning and building. Each node calls the same
-`run_*` function the CLI calls, so there is one implementation per stage.
+Stages run in a fixed order over typed state, with an approval gate between
+planning and building. Each node calls the same `run_*` function as the CLI.
 """
 
 from __future__ import annotations
@@ -25,20 +24,24 @@ from .state import STAGES, PipelineState
 
 
 def _run_dir(state: PipelineState) -> Path:
+    """The run folder."""
     return Path(state.get("run_dir") or ".")
 
 
 def _session_path(state: PipelineState) -> Path:
+    """The session file, by default session.json in the run folder."""
     return Path(state.get("session_path") or _run_dir(state) / "session.json")
 
 
 def segment_node(state: PipelineState) -> dict:
+    """Group the session's clicks into segments."""
     out = _run_dir(state) / "segments.json"
     run_segmenter_path(_session_path(state), out, run=state.get("run", "adhoc"))
     return {"segments_path": str(out)}
 
 
 def trace_node(state: PipelineState) -> dict:
+    """Explain each segment against the Odoo code that ran."""
     out = _run_dir(state) / "traces.json"
     run_tracer_path(
         Path(state["segments_path"]), _session_path(state), out,
@@ -48,6 +51,7 @@ def trace_node(state: PipelineState) -> dict:
 
 
 def assess_node(state: PipelineState) -> dict:
+    """Score how hard each step and segment was."""
     out = _run_dir(state) / "assessment.json"
     run_assessor_path(
         Path(state["segments_path"]), _session_path(state), out,
@@ -61,11 +65,12 @@ MAX_PLAN_REVISIONS = 2
 
 
 def plan_node(state: PipelineState) -> dict:
+    """Plan a change, revising the previous plan if a reviewer sent it back."""
     run_dir = _run_dir(state)
     out = run_dir / "plan.json"
     feedback = state.get("review_notes") or None
     if feedback:
-        # Keep the plan that was sent back, for the record and for the planner to read.
+        # Keep the plan that was sent back, for the record and for the revision.
         number = state.get("plan_revisions", 1)
         for name in ("plan.json", "plan.md"):
             previous = run_dir / name
@@ -91,7 +96,7 @@ def review_update(decision: dict, revisions: int) -> dict:
 
 
 def approve_node(state: PipelineState) -> dict:
-    """Pause for a person. Nothing is built or pushed without this."""
+    """Pause for a person to approve, send back or reject the plan."""
     plan = Plan.model_validate_json(
         Path(state["plan_path"]).read_text(encoding="utf-8")
     )
@@ -123,6 +128,7 @@ def approve_node(state: PipelineState) -> dict:
 
 
 def build_node(state: PipelineState) -> dict:
+    """Build the approved plan, with the notes it was approved with."""
     from ..agents.builder import run_builder_path
 
     out = _run_dir(state) / "build.json"
@@ -147,12 +153,10 @@ NODES = {
 
 
 def is_tool_gate(payload: Any) -> bool:
-    """True when a pause is the builder asking to run a gated tool.
+    """Whether a pause is the builder asking to run a gated tool.
 
-    The pipeline pauses for two different reasons, and each expects a
-    differently shaped answer: the plan gate (approve_node) takes
-    `{"approved", "notes"}`, while the builder's tool gates (push, pull
-    request, email) take `{"decisions": [...]}`, one per requested action.
+    The plan gate takes `{"approved", "notes"}`; the tool gates take
+    `{"decisions": [...]}`, one per requested action.
     """
     return isinstance(payload, dict) and "action_requests" in payload
 
@@ -190,9 +194,8 @@ def build_graph(checkpointer: Any = None, until: str | None = None):
     """Compile the pipeline.
 
     Args:
-        checkpointer: a LangGraph checkpointer. With one, a crashed run resumes
-            from the last finished node under the same thread_id - and it is
-            required for the approval interrupt to be resumable.
+        checkpointer: a LangGraph checkpointer; needed to resume a run and to
+            answer an approval.
         until: last stage to include, one of STAGES. Defaults to the whole
             pipeline.
 
@@ -229,9 +232,7 @@ def start_or_resume(graph: Any, config: dict, initial_state: dict, restart: bool
     """Run the pipeline on a thread, continuing an unfinished run instead of redoing it.
 
     LangGraph resumes from the last finished node only when invoked with no
-    input; invoking with the initial state starts over and pays for every
-    stage again. A run paused for approval is left alone - answering it is
-    `--approve` / `--reject`.
+    input. A run waiting for approval is returned as it is.
     """
     snapshot = graph.get_state(config)
     if snapshot.interrupts:
@@ -244,11 +245,8 @@ def start_or_resume(graph: Any, config: dict, initial_state: dict, restart: bool
 def checkpoint_types() -> list[tuple[str, str]]:
     """Every contract model, registered so checkpoints can restore it.
 
-    Agents run inside pipeline nodes inherit the checkpointer, so their
-    structured responses (SegmentLog, TracedSegmentDraft, Plan, ...) are
-    saved in it. LangGraph restores only registered types - unregistered ones
-    warn today and are slated to be refused - and a refused type would break
-    resuming a run. Derived from the module so a new contract cannot be missed.
+    Agents inside pipeline nodes save their structured responses in the
+    checkpoint, and LangGraph only restores registered types.
     """
     from pydantic import BaseModel
 
@@ -279,8 +277,3 @@ def sqlite_checkpointer(path: str | Path):
         )
     finally:
         connection.close()
-
-
-# Module-level graph for `langgraph dev` / LangGraph Studio, which supplies
-# its own persistence.
-graph = build_graph()

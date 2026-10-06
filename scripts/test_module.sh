@@ -4,10 +4,8 @@
 #
 #   ./scripts/test_module.sh <module_name>
 #
-# Odoo's web server is stopped while the tests run: a server loading the same
-# database can collide with the install's writes to the module tables
-# ("could not serialize access due to concurrent update"). It is started
-# again afterwards, whatever the result.
+# Odoo's web server is stopped while the tests run, since a server loading the
+# same database can collide with the install, and started again afterwards.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

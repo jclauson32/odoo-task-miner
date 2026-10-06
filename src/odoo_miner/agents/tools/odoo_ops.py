@@ -1,7 +1,6 @@
-"""Tools that drive Odoo and the recording pipeline.
+"""Operations on Odoo and the recording pipeline, behind the builder's tools.
 
-Thin wrappers over commands that already work by hand. Every one returns text
-the agent can read, including the failure, rather than raising.
+Each wraps a command a person can run by hand, and returns text, failures included.
 """
 
 from __future__ import annotations
@@ -18,12 +17,10 @@ from pathlib import Path
 from ..config import settings
 
 DEFAULT_TIMEOUT = 900
-# docker-compose.yml and scripts/ live at the repository root; run from there
-# whatever the caller's working directory is.
+# Commands run from the repository root, where docker-compose.yml and scripts/ are.
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RESTORE_HOOK = str(REPO_ROOT / "scripts" / "restore_db.sh")
-# The same scripts a person runs, so the builder installs and tests a module
-# exactly the way the demo and the runbook do.
+# The builder installs and tests modules with the same scripts a person uses.
 INSTALL_SCRIPT = str(REPO_ROOT / "scripts" / "install_module.sh")
 TEST_SCRIPT = str(REPO_ROOT / "scripts" / "test_module.sh")
 
@@ -34,6 +31,7 @@ def _run(
     cwd: Path | None = REPO_ROOT,
     env: dict[str, str] | None = None,
 ) -> tuple[int, str]:
+    """Run a command; return its exit code and combined output, never raising."""
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
@@ -68,17 +66,14 @@ _TEST_RESULT = re.compile(r"(\d+) failed, (\d+) error\(s\) of (\d+) tests")
 
 
 def run_module_tests(name: str, run_dir: str | None = None) -> str:
-    """Run an Odoo module's tests and save the full output.
+    """Run a module's tests and save Odoo's full output.
 
-    Installs the module if needed and updates it if not (`-i` and `-u`), so
-    its tests run whether or not they are tagged post_install. Passing needs
-    Odoo's own result line with at least one test: a run where nothing was
-    tested is reported as a failure, not a pass.
+    Passing needs Odoo's result line with at least one test; a run where
+    nothing was tested counts as a failure.
 
     Args:
         name: module directory name under addons/.
-        run_dir: where to write tests.log. Defaults to out/<name>/, never the module
-            itself, so the log cannot end up in a commit.
+        run_dir: where to write tests.log; defaults to out/<name>/, outside the module.
 
     Returns:
         Whether the tests passed and how many ran, with the failing lines when not.
@@ -114,10 +109,7 @@ def replay_workflow(
     recording_path: str, run_dir: str, module: str | None = None,
     original_recording: str | None = None,
 ) -> str:
-    """Restore the database, install a module, then replay a recording.
-
-    In that order: restoring after the install would remove the module, and
-    the replay would measure the workflow without the change.
+    """Restore the database, install a module, then replay a recording, in that order.
 
     Args:
         recording_path: a Chrome Recorder JSON file.
@@ -150,8 +142,8 @@ def replay_workflow(
     with tempfile.TemporaryDirectory(prefix="odoo-miner-replay-") as tmp:
         replayable = Path(tmp) / Path(recording_path).name
         replayable.write_text(json.dumps(recording), encoding="utf-8")
-        # The same interpreter and package that are running now, not whatever
-        # `odoo-miner` happens to be first on PATH. No pre-hook: restored above.
+        # This interpreter rather than whichever odoo-miner is on PATH; no
+        # pre-hook, since the database was restored above.
         code, output = _run(
             [sys.executable, "-m", "odoo_miner.cli", "run", str(replayable), "-d", run_dir,
              "--screenshots"],
@@ -190,11 +182,10 @@ def _effort(run_dir: Path, segment_if_missing: bool) -> tuple[float, int]:
 
 
 def measure_effort(run_dir: str, before_dir: str | None = None) -> str:
-    """Effort for a replayed run, and the change from a run before it.
+    """Effort for a replayed run, and the change from the run before it.
 
-    Both sides are scored the same way - the deterministic signals, without
-    the model's adjustments - so the difference is the workflow's, not the
-    scorer's. The after-run is segmented first if it has not been.
+    Both sides are scored by code alone, without the model's adjustments. The
+    after-run is segmented first if it has not been.
 
     Args:
         run_dir: a folder containing session.json (the after-run).
@@ -215,6 +206,3 @@ def measure_effort(run_dir: str, before_dir: str | None = None) -> str:
         f"effort before {before:g} ({before_steps} steps), after {after:g} "
         f"({after_steps} steps): {change:+.0f}%"
     )
-
-
-TOOLS = [install_module, run_module_tests, replay_workflow, measure_effort]

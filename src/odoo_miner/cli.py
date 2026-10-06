@@ -1,10 +1,7 @@
-"""odoo-miner command line.
+"""The odoo-miner command line.
 
-    odoo-miner ingest recording.json            -> clicks.json
-    odoo-miner replay recording.json            -> network.json  (Node + Puppeteer)
-    odoo-miner merge clicks.json network.json   -> session.json
-    odoo-miner run recording.json               -> all three, into one folder
-    odoo-miner show clicks.json|session.json    -> readable table
+Recording: ingest, replay, merge, run, show. Analysis: segment, trace, assess,
+plan, analyze. Delivery and checks: report, audit, doctor.
 """
 
 from __future__ import annotations
@@ -25,32 +22,36 @@ from .merge import merge as merge_logs
 from .models import ClickLog, NetworkLog, Session
 from .recorder import RecordingError, load_recording
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help="Parse Odoo workflow recordings for the analysis agents.")
+app = typer.Typer(no_args_is_help=True, add_completion=False, help="Record, replay and analyze Odoo workflows.")
+console = Console()
+err = Console(stderr=True)
 
 
 @app.callback()
 def _load_settings() -> None:
-    """Load .env before any command, so every run - traces included - sees it."""
+    """Load .env before any command, so every run and its traces see it."""
     from .agents.config import load_env
 
     load_env()
-console = Console()
-err = Console(stderr=True)
+
 
 DEFAULT_SCRIPT = Path(__file__).resolve().parents[2] / "replay" / "capture.mjs"
 
 
 def _write(model: BaseModel, path: Path) -> None:
+    """Write a model to `path` as indented JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(model.model_dump_json(indent=2), encoding="utf-8")
 
 
 def _fail(message: str) -> None:
+    """Print an error and exit with status 1."""
     err.print(f"[red]Error:[/red] {message}")
     raise typer.Exit(code=1)
 
 
 def _load(path: Path, model: type[BaseModel]):
+    """Read a JSON file as `model`, or exit with the reason it is not one."""
     try:
         return model.model_validate_json(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -60,6 +61,7 @@ def _load(path: Path, model: type[BaseModel]):
 
 
 def _do_ingest(recording: Path, out: Path, keep_noise: bool) -> ClickLog:
+    """Parse a recording into clicks.json."""
     try:
         log = load_recording(recording, keep_noise=keep_noise)
     except FileNotFoundError:
@@ -72,11 +74,7 @@ def _do_ingest(recording: Path, out: Path, keep_noise: bool) -> ClickLog:
 
 
 def _keep_recording(recording: Path, out_dir: Path) -> None:
-    """Save the recording with the run, secrets redacted, and note where the original is.
-
-    The builder edits this copy into the after-recording; the replay restores
-    the redacted values from the original, so they never reach a model.
-    """
+    """Save a redacted copy of the recording with the run, and the original's path."""
     from .recorder import redact_recording
 
     data = json.loads(recording.read_text(encoding="utf-8"))
@@ -90,6 +88,7 @@ def _do_replay(
     pre_hook: str | None, timeout_ms: int, settle_ms: int, chrome: str | None,
     screenshots: Path | None = None,
 ) -> NetworkLog:
+    """Run the Node replay and return the backend calls it captured."""
     if not script.exists():
         _fail(f"Replay script not found at {script}. Pass --script or set ODOO_MINER_REPLAY.")
     if shutil.which("node") is None:
@@ -140,6 +139,7 @@ def _do_replay(
 
 
 def _do_merge(clicks: ClickLog, network: NetworkLog | None, out: Path) -> Session:
+    """Merge the clicks and their backend calls into session.json."""
     session = merge_logs(clicks, network)
     _write(session, out)
     writes = sum(1 for c in session.clicks if c.has_write)
@@ -227,7 +227,7 @@ def run(
 
 @app.command()
 def show(
-    path: Path = typer.Argument(..., help="clicks.json or session.json"),
+    path: Path = typer.Argument(..., help="Any pipeline file, from clicks.json to build.json."),
     first: int | None = typer.Option(None, "--from", help="First step number to show."),
     last: int | None = typer.Option(None, "--to", help="Last step number to show."),
 ):
@@ -245,6 +245,7 @@ def show(
     ]
 
     def screen(c) -> str:
+        """The screen a click happened on, as far as its URL tells."""
         parts = [c.page.model, str(c.page.record_id or "") or None, c.page.view_type]
         return " ".join(filter(None, parts)) or "/".join(c.page.path_slugs)
 
@@ -282,24 +283,19 @@ def show(
 
 # ---------------------------------------------------------------- analysis stages
 #
-# Each of these is also a node in the LangGraph pipeline (see
-# odoo_miner/pipeline/graph.py); the function underneath is the same one. The
-# agent libraries are imported inside the commands so that `ingest`, `replay`
-# and `merge` stay fast and keep working without them.
+# Each stage is also a node in the pipeline (pipeline/graph.py). The agent
+# libraries are imported inside the commands so the recording commands stay fast.
 
 
 def _session_arg(path: Path) -> Path:
+    """`path`, or exit if the session has not been recorded yet."""
     if not path.exists():
         _fail(f"{path} not found. Run `odoo-miner run` first.")
     return path
 
 
 def _resolve_segments(path: Path) -> Path:
-    """Accept segments.json, or traces.json and find segments.json beside it.
-
-    Scoring needs each segment's step indexes, which only segments.json
-    carries, so a traces.json argument is resolved to its sibling.
-    """
+    """segments.json, or the one beside a traces.json; scoring needs its step indexes."""
     if path.name == "traces.json":
         sibling = path.with_name("segments.json")
         if not sibling.exists():
@@ -405,6 +401,7 @@ def _show_pending(payload: dict) -> None:
 
 
 def _show_citation_check(problems: list[str]) -> None:
+    """Print the result of the plan's citation check."""
     if problems:
         console.print("  [yellow]Citations to check by hand before approving:[/yellow]")
         for problem in problems:
@@ -455,7 +452,7 @@ def analyze(
 
     with sqlite_checkpointer(run_dir / "pipeline.sqlite") as checkpointer:
         graph = build_graph(checkpointer=checkpointer, until=until)
-        # Named and tagged so the whole run is one findable tree in LangSmith.
+        # One named, tagged tree per run in LangSmith.
         config = {
             "configurable": {"thread_id": thread_id},
             "run_name": f"odoo-miner analyze {name}",
@@ -488,8 +485,7 @@ def analyze(
     if pending:
         payload = pending[0].value if hasattr(pending[0], "value") else pending[0]
         _show_pending(payload)
-        # Answer with the same --until the run used, so approving a plan that
-        # proposes a module does not start a builder this run left out.
+        # Keep the run's --until, so an approval cannot start a stage it left out.
         scope = f"--until {until} " if until else ""
         base = f"odoo-miner analyze {run_dir} {scope}--thread {thread_id}"
         console.print(
@@ -511,6 +507,7 @@ def analyze(
         console.print(f"  {label}: {path}")
     for problem in result.get("errors") or []:
         err.print(f"[yellow]{escape(problem)}[/yellow]")
+
 
 @app.command()
 def doctor():
@@ -540,8 +537,6 @@ def report(
     yes: bool = typer.Option(False, "--yes", "-y", help="Send without asking for confirmation."),
 ):
     """Email the findings - the plan and screenshots of where the user got stuck - to REPORT_EMAIL_TO."""
-    import os
-
     from .agents.config import settings
     from .agents.reporting import compose_report
     from .agents.tools.delivery import send_report_email
@@ -570,6 +565,7 @@ def report(
 
 
 def _show_segments(data: dict, path: Path) -> None:
+    """Segments as a table, with each one's steps and outcome."""
     table = Table(title=f"Segments - {data.get('session') or path}")
     for column, justify in [("Segment", "left"), ("Steps", "right"), ("Outcome", "left"), ("What the user did", "left")]:
         table.add_column(column, justify=justify)
@@ -583,6 +579,7 @@ def _show_segments(data: dict, path: Path) -> None:
 
 
 def _show_traces(data: dict, path: Path) -> None:
+    """Each segment's code references and explanation."""
     for seg in data["segments"]:
         console.print(f"[bold]{seg['segment_id']}[/bold] [dim]{seg['kind']}[/dim]")
         for ref in seg.get("actions", []):
@@ -593,6 +590,7 @@ def _show_traces(data: dict, path: Path) -> None:
 
 
 def _show_assessment(data: dict, path: Path) -> None:
+    """Effort per segment, with its hardest step and friction."""
     table = Table(title=f"Effort by segment - total {data.get('total_effort', 0):g}")
     table.add_column("Segment")
     table.add_column("Effort", justify="right")
@@ -609,6 +607,7 @@ def _show_assessment(data: dict, path: Path) -> None:
 
 
 def _show_plan(data: dict, path: Path) -> None:
+    """The plan's decision, summary, criteria, risks and citation check."""
     console.print(f"[bold]Decision:[/bold] {escape(data['decision'].replace('_', ' '))}")
     if data.get("module_name"):
         console.print(f"[bold]Module:[/bold] {escape(data['module_name'])}")
@@ -622,7 +621,10 @@ def _show_plan(data: dict, path: Path) -> None:
 
 
 def _show_build(data: dict, path: Path) -> None:
+    """The build's tests, replay, effort before and after, and delivery."""
+
     def status(ok: bool, good: str, bad: str) -> str:
+        """`good` in green when `ok`, otherwise `bad` in red."""
         return f"[green]{good}[/green]" if ok else f"[red]{bad}[/red]"
 
     before, after = data.get("effort_before", 0), data.get("effort_after", 0)
@@ -644,11 +646,13 @@ def _show_build(data: dict, path: Path) -> None:
 
 
 def _is_segments(data: dict) -> bool:
+    """Whether a file is a segments.json."""
     first = (data.get("segments") or [{}])[0]
     return "step_indexes" in first
 
 
 def _is_traces(data: dict) -> bool:
+    """Whether a file is a traces.json."""
     first = (data.get("segments") or [{}])[0]
     return "kind" in first and "actions" in first
 

@@ -1,7 +1,6 @@
-"""Settings for the agent stages, driven by the environment.
+"""Settings for the agent stages, read from the environment.
 
-Model names are never hard-coded at a call site; they come from here, which
-reads `.env` (see `.env.example`) and falls back to sensible defaults.
+Model names come from here (see `.env.example`), never from a call site.
 """
 
 from __future__ import annotations
@@ -12,18 +11,15 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-# Default models. `MODEL` does the judgement work; `FAST_MODEL` is for
-# subagents and cheap checks. These are the current model ids - do not append
-# a date suffix, the plain id is complete.
+# The main model does the judgement work; the fast one serves subagents and
+# cheap checks. Model ids take no date suffix.
 DEFAULT_MODEL = "anthropic:claude-sonnet-5"
 DEFAULT_FAST_MODEL = "anthropic:claude-haiku-4-5"
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
-# Per-request timeout. Measured over 278 calls in the live runs: median 2.4 s,
-# 95th percentile 13 s, slowest 59 s (the planner). Without a timeout the SDK
-# waits 10 minutes per attempt, so one stalled connection froze a run for
-# over five minutes before it was noticed. Two retries bound the worst case.
+# Over 278 measured calls the median was 2.4 s and the slowest 59 s; the SDK's
+# own default is 10 minutes per attempt.
 REQUEST_TIMEOUT_S = 120
 MAX_RETRIES = 2
 
@@ -32,10 +28,8 @@ MAX_RETRIES = 2
 def load_env() -> None:
     """Load .env from the project root into the environment, once per process.
 
-    Called at CLI start-up, before any command runs: LangChain decides whether
-    to trace a run when the run starts, so loading .env later - say, when the
-    first stage builds its model - leaves the pipeline untraced in a fresh
-    terminal. Variables already set in the environment win over the file.
+    Called when the CLI starts, because LangChain decides whether to trace a run
+    as the run starts. Variables already set in the environment win.
     """
     try:
         from dotenv import load_dotenv
@@ -43,9 +37,6 @@ def load_env() -> None:
         return
     root = Path(__file__).resolve().parents[3]
     load_dotenv(root / ".env", override=False)
-
-
-_load_dotenv_once = load_env
 
 
 class Settings(BaseModel):
@@ -74,6 +65,7 @@ class Settings(BaseModel):
 
     @property
     def odoo_source_abs(self) -> Path:
+        """The Odoo source path, made absolute against the working directory."""
         return self.odoo_source if self.odoo_source.is_absolute() else Path.cwd() / self.odoo_source
 
     def prompt(self, name: str) -> str:
@@ -87,7 +79,7 @@ class Settings(BaseModel):
 @lru_cache(maxsize=1)
 def settings() -> Settings:
     """Process-wide settings, read from the environment once."""
-    _load_dotenv_once()
+    load_env()
     env = os.environ
     return Settings(
         model=env.get("ODOO_MINER_MODEL", DEFAULT_MODEL),
@@ -102,15 +94,12 @@ def settings() -> Settings:
 
 
 def load_prompt(name: str) -> str:
+    """A prompt's text, by name."""
     return settings().prompt(name)
 
 
 def trace_config(run: str, stage: str, **extra) -> dict:
-    """LangSmith metadata so a stage's trace is findable.
-
-    Passed as `config=` to any agent invoke; with LANGSMITH_TRACING=true the
-    tracing itself needs no code.
-    """
+    """LangSmith metadata and tags for one stage's call, passed as `config=`."""
     return {
         "metadata": {"run": run, "stage": stage, **extra},
         "tags": ["odoo-miner", stage],
@@ -118,11 +107,7 @@ def trace_config(run: str, stage: str, **extra) -> dict:
 
 
 def chat_model(stage: str):
-    """The chat model for a stage, with a request timeout and bounded retries.
-
-    Every agent builds its model here rather than passing a model string, so
-    no stage can hang on a stalled connection.
-    """
+    """The chat model for a stage, with a request timeout and bounded retries."""
     from langchain.chat_models import init_chat_model
 
     return init_chat_model(model_for(stage), timeout=REQUEST_TIMEOUT_S, max_retries=MAX_RETRIES)

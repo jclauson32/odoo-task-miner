@@ -1,9 +1,8 @@
 """Tests for the agent stages.
 
-Every test here runs without an API key: the deterministic halves are tested
-directly, and the LLM halves are tested with a fake agent that returns a
-canned structured response. Tests that need the Odoo source checkout skip
-when it is absent.
+None needs an API key: the deterministic halves are tested directly, and the
+model halves with a fake agent that returns a canned response. Tests that need
+the Odoo source checkout are skipped without it.
 """
 
 from __future__ import annotations
@@ -31,10 +30,8 @@ from odoo_miner.models import Session
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLD = ROOT / "evals/datasets/rfq_to_payment.segments.json"
-# The committed reference session, so the suite does not depend on a local run.
-# A fresh run in out/ takes precedence when it is there.
+# The committed session the gold labels describe, so no test depends on a local run.
 SESSION = ROOT / "tests/fixtures/rfq_to_payment.session.json"
-LIVE_SESSION = ROOT / "out/rfq_to_payment/session.json"
 
 
 # ----------------------------------------------------------------- fixtures
@@ -42,14 +39,13 @@ LIVE_SESSION = ROOT / "out/rfq_to_payment/session.json"
 
 @pytest.fixture(scope="module")
 def session() -> Session:
-    path = LIVE_SESSION if LIVE_SESSION.exists() else SESSION
-    if not path.exists():
-        pytest.skip(f"{path} not found; run the pipeline first")
-    return Session.model_validate_json(path.read_text(encoding="utf-8"))
+    """The committed reference session."""
+    return Session.model_validate_json(SESSION.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
 def gold() -> SegmentLog:
+    """The hand-labelled segmentation of the reference session."""
     return SegmentLog.model_validate_json(GOLD.read_text(encoding="utf-8"))
 
 
@@ -57,10 +53,12 @@ class FakeAgent:
     """Stands in for a create_agent result. Records what it was asked."""
 
     def __init__(self, response):
+        """`response` is returned as is, or called with the request to make one."""
         self.response = response
         self.calls: list[dict] = []
 
     def invoke(self, payload, config=None):
+        """Record the request and return the canned response."""
         self.calls.append({"payload": payload, "config": config})
         response = (
             self.response(payload) if callable(self.response) else self.response
@@ -72,6 +70,7 @@ class FakeAgent:
 
 
 def test_gold_validates_and_covers_the_session(session, gold):
+    """The gold labels cover every step of the session exactly once."""
     assert len(gold.segments) >= 8
     covered = [i for s in gold.segments for i in s.step_indexes]
     assert covered == [c.step_index for c in session.clicks]
@@ -79,6 +78,7 @@ def test_gold_validates_and_covers_the_session(session, gold):
 
 
 def test_contracts_round_trip():
+    """Contracts survive a JSON round trip."""
     plan = Plan(decision="customize", summary="s", module_name="m")
     assert Plan.model_validate_json(plan.model_dump_json()).module_name == "m"
     built = BuildResult(branch="feat/m", tests_passed=True)
@@ -86,6 +86,7 @@ def test_contracts_round_trip():
 
 
 def test_step_score_is_bounded():
+    """A step score outside 1-5 is rejected."""
     with pytest.raises(ValidationError):
         StepDifficulty(step_index=1, score=9)
 
@@ -94,6 +95,7 @@ def test_step_score_is_bounded():
 
 
 def test_drops_tab_but_keeps_enter(session):
+    """Tab presses are noise; Enter is not."""
     noise = [c for c in session.clicks if segmenter.is_noise(c)]
     assert noise, "the reference session has a Tab keyDown"
     assert all(c.key == "Tab" for c in noise)
@@ -102,12 +104,14 @@ def test_drops_tab_but_keeps_enter(session):
 
 
 def test_rendering_is_one_line_per_visible_step(session):
+    """The prompt has one line per step that is not noise."""
     rendered = segmenter.render_session(session)
     body = rendered.split("\n\n", 1)[1]
     assert len(body.strip().splitlines()) == len(segmenter.expected_indexes(session))
 
 
 def test_boundary_hints_mark_writes_and_errors(session):
+    """Boundary hints mark the writes and the errors."""
     hints = segmenter.boundary_hints(session)
     writes = [i for i, marks in hints.items() if "WRITE" in marks]
     errors = [i for i, marks in hints.items() if "ERROR" in marks]
@@ -117,6 +121,7 @@ def test_boundary_hints_mark_writes_and_errors(session):
 
 
 def test_validation_catches_bad_segmentations(session, gold):
+    """Missing, duplicated and unknown steps are all caught."""
     assert segmenter.validate_segment_log(_without_noise(gold, session), session) == []
 
     missing = gold.model_copy(update={"segments": gold.segments[:-1]})
@@ -144,6 +149,7 @@ def _without_noise(gold: SegmentLog, session: Session) -> SegmentLog:
 
 
 def test_run_segmenter_reattaches_noise(session, gold):
+    """Noise steps are put back after the model answers."""
     agent = FakeAgent(_without_noise(gold, session))
     result = segmenter.run_segmenter(session, agent=agent, run="test")
     covered = [i for s in result.segments for i in s.step_indexes]
@@ -152,6 +158,7 @@ def test_run_segmenter_reattaches_noise(session, gold):
 
 
 def test_run_segmenter_retries_then_succeeds(session, gold):
+    """An invalid answer is retried once, with the reasons."""
     good = _without_noise(gold, session)
     bad = good.model_copy(update={"segments": good.segments[:2]})
     responses = iter([bad, good])
@@ -166,6 +173,7 @@ def test_run_segmenter_retries_then_succeeds(session, gold):
 
 
 def test_run_segmenter_raises_when_never_valid(session, gold):
+    """A segmentation that stays invalid raises."""
     bad = _without_noise(gold, session)
     bad = bad.model_copy(update={"segments": bad.segments[:1]})
     with pytest.raises(ValueError, match="invalid segmentation"):
@@ -176,6 +184,7 @@ def test_run_segmenter_raises_when_never_valid(session, gold):
 
 
 def test_classify_segment_from_calls(session, gold):
+    """Segments are classified from their calls."""
     by_id = {s.segment_id: s for s in gold.segments}
     confirm = tracer.segment_clicks(session, by_id["s07"].step_indexes)
     assert tracer.classify_segment(confirm) in ("action", "mixed")
@@ -186,6 +195,7 @@ def test_classify_segment_from_calls(session, gold):
 
 
 def test_retrievals_skip_framework_chatter(session, gold):
+    """Lookups leave out the framework's own calls."""
     by_id = {s.segment_id: s for s in gold.segments}
     clicks = tracer.segment_clicks(session, by_id["s03"].step_indexes)
     methods = {q.method for q in tracer.retrievals_for(clicks)}
@@ -194,6 +204,7 @@ def test_retrievals_skip_framework_chatter(session, gold):
 
 
 def test_tracer_drops_invented_coderefs(session, gold):
+    """Code references that do not exist on disk are dropped."""
     invented = TracedSegmentDraft(
         segment_id="s07", kind="action",
         actions=[CodeRef(module="purchase", file="addons/nope/no_such_file.py", line=1, symbol="X.y")],
@@ -205,12 +216,14 @@ def test_tracer_drops_invented_coderefs(session, gold):
 
 
 def test_tracer_caches_its_tool_loop():
+    """The tracer uses prompt caching."""
     from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 
     assert any(isinstance(m, AnthropicPromptCachingMiddleware) for m in tracer.tracer_middleware())
 
 
 def test_tests_do_not_send_traces():
+    """Tracing is off for the test suite."""
     import os
 
     assert os.environ["LANGSMITH_TRACING"] == "false"
@@ -239,16 +252,21 @@ def test_every_response_format_survives_strict_schema():
 
 @pytest.mark.skipif(not odoo_source.source_available(), reason="vendor/odoo not cloned")
 class TestOdooSource:
+    """Searches of the real Odoo source checkout."""
+
     def test_finds_button_confirm_in_purchase(self):
+        """button_confirm is found in the purchase module."""
         refs = odoo_source.find_method("purchase.order", "button_confirm")
         assert refs
         assert any(r.module == "purchase" and "purchase_order.py" in r.file for r in refs)
 
     def test_finds_action_post_on_account_move(self):
+        """action_post is found in the account module."""
         refs = odoo_source.find_method("account.move", "action_post")
         assert any(r.module == "account" for r in refs)
 
     def test_every_ref_exists_at_that_line(self):
+        """Every reference points at the method's def line."""
         root = odoo_source.settings().odoo_source_abs
         for model, method in [("purchase.order", "button_confirm"), ("account.move", "action_post")]:
             for ref in odoo_source.find_method(model, method):
@@ -257,26 +275,29 @@ class TestOdooSource:
                 assert f"def {method}" in lines[ref.line - 1]
 
     def test_wrong_model_is_not_returned(self):
-        # mail's fetchmail.server also defines button_confirm; different model.
+        """fetchmail.server also defines button_confirm, but on another model."""
         refs = odoo_source.find_method("purchase.order", "button_confirm", installed_only=False)
         assert all("fetchmail" not in r.file for r in refs)
 
     def test_read_source_refuses_paths_outside_the_roots(self):
+        """Paths outside the source and addons/ are refused."""
         for bad in ["../../../etc/passwd", "/etc/passwd"]:
             with pytest.raises((PermissionError, ValueError)):
                 odoo_source.read_source(bad, 1, 2)
 
     def test_a_missing_file_inside_the_source_says_so(self):
-        """It used to claim the path was outside the source, which sent the model the wrong way."""
+        """A missing file is reported as missing, not as outside the source."""
         with pytest.raises(FileNotFoundError, match="No such file"):
             odoo_source.read_source("addons/purchase/wizard/purchase_order_line_invoice.py", 1, 5)
 
     def test_read_source_is_bounded(self):
+        """read_source returns at most MAX_READ_LINES lines."""
         text = odoo_source.read_source("addons/purchase/models/purchase_order.py", 1, 10_000)
         assert len(text.splitlines()) <= odoo_source.MAX_READ_LINES
 
 
 def test_model_names_reads_name_and_inherit():
+    """A class's models come from _name and _inherit."""
     import ast
 
     tree = ast.parse(
@@ -294,23 +315,27 @@ def test_model_names_reads_name_and_inherit():
 
 
 def test_deterministic_scores_are_stable(session, gold):
+    """The same session always gets the same scores."""
     first = assessor.assess_deterministic(session, gold)
     second = assessor.assess_deterministic(session, gold)
     assert first.model_dump_json() == second.model_dump_json()
 
 
 def test_every_step_is_scored_once(session, gold):
+    """Every step gets exactly one score."""
     assessment = assessor.assess_deterministic(session, gold)
     scored = [s.step_index for seg in assessment.segments for s in seg.steps]
     assert sorted(scored) == sorted(c.step_index for c in session.clicks)
 
 
 def test_scores_are_in_range(session, gold):
+    """Every score is between 1 and 5."""
     assessment = assessor.assess_deterministic(session, gold)
     assert all(1 <= s.score <= 5 for seg in assessment.segments for s in seg.steps)
 
 
 def test_bill_segment_reports_error_and_modal(session, gold):
+    """The vendor bill segment reports the error and the dialog."""
     assessment = assessor.assess_deterministic(session, gold)
     bill = next(s for s in assessment.segments if s.segment_id == "s10")
     assert any("error" in f.lower() for f in bill.friction)
@@ -318,6 +343,7 @@ def test_bill_segment_reports_error_and_modal(session, gold):
 
 
 def test_error_signal_raises_the_score(session, gold):
+    """A step with an error scores at least 3."""
     assessment = assessor.assess_deterministic(session, gold)
     errored = [
         s for seg in assessment.segments for s in seg.steps if s.signals.get("error")
@@ -336,6 +362,7 @@ def test_backtrack_is_scoped_to_one_segment(session, gold):
 
 
 def test_llm_adjustments_are_clamped(session, gold):
+    """The model can move a score by at most one point."""
     baseline = assessor.assess_deterministic(session, gold).segments[0]
     runaway = baseline.model_copy(update={
         "steps": [s.model_copy(update={"score": 5}) for s in baseline.steps],
@@ -348,6 +375,7 @@ def test_llm_adjustments_are_clamped(session, gold):
 
 
 def test_clamp_drops_invented_steps_and_restores_missing(session, gold):
+    """Invented steps are dropped and missing ones restored."""
     baseline = assessor.assess_deterministic(session, gold).segments[0]
     tampered = baseline.model_copy(update={
         "steps": [StepDifficulty(step_index=424242, score=5)],
@@ -357,6 +385,7 @@ def test_clamp_drops_invented_steps_and_restores_missing(session, gold):
 
 
 def test_run_assessor_offline_makes_no_agent_call(session, gold):
+    """explain=False makes no model call."""
     agent = FakeAgent(None)
     result = assessor.run_assessor(gold, session, agent=agent, explain=False)
     assert isinstance(result, Assessment)
@@ -364,10 +393,12 @@ def test_run_assessor_offline_makes_no_agent_call(session, gold):
 
 
 def test_run_assessor_with_agent_clamps_and_recomputes(session, gold):
+    """The model's answer is clamped and the effort recomputed."""
     baseline = assessor.assess_deterministic(session, gold)
     by_id = {s.segment_id: s for s in baseline.segments}
 
     def respond(payload):
+        """The fake model's answer: every step of the segment raised to 5."""
         content = payload["messages"][0]["content"]
         segment_id = content.split()[1].rstrip(":")
         original = by_id[segment_id]
@@ -388,6 +419,7 @@ def test_run_assessor_with_agent_clamps_and_recomputes(session, gold):
 
 
 def test_graph_topology_and_slicing():
+    """The stages run in order, and --until cuts the graph short."""
     from odoo_miner.pipeline.graph import build_graph
     from odoo_miner.pipeline.state import STAGES
 
@@ -409,6 +441,7 @@ def test_graph_topology_and_slicing():
 
 
 def test_graph_rejects_unknown_stage():
+    """An unknown --until stage is an error."""
     from odoo_miner.pipeline.graph import build_graph
 
     with pytest.raises(ValueError, match="Unknown stage"):
@@ -416,6 +449,7 @@ def test_graph_rejects_unknown_stage():
 
 
 def test_after_review_builds_revises_or_ends():
+    """After review the run builds, goes back to planning, or ends."""
     from langgraph.graph import END
 
     from odoo_miner.pipeline.graph import _after_review
@@ -431,6 +465,7 @@ def test_after_review_builds_revises_or_ends():
 
 
 def test_rejecting_with_notes_sends_the_plan_back_a_limited_number_of_times():
+    """A plan can be sent back with notes, at most MAX_PLAN_REVISIONS times."""
     from odoo_miner.pipeline.graph import MAX_PLAN_REVISIONS, review_update
 
     sent_back = review_update({"approved": False, "notes": "Policy: bill at PO terms."}, 0)
@@ -453,6 +488,7 @@ def test_a_plan_sent_back_is_revised_with_the_notes_and_reviewed_again(tmp_path,
     requests = []
 
     def fake_planner(run_dir, out, run="adhoc", feedback=None, agent=None):
+        """A stand-in planner that writes a plan without a model."""
         requests.append(feedback)
         decision = "customize" if feedback else "no_change"
         plan = Plan(decision=decision, summary=f"plan {len(requests)}",
@@ -481,6 +517,7 @@ def test_a_plan_sent_back_is_revised_with_the_notes_and_reviewed_again(tmp_path,
 
 
 def test_the_revision_request_carries_the_notes():
+    """The revision request has the notes and points at the rejected plan."""
     from odoo_miner.agents.planner import PLAN_PROMPT, revision_prompt
 
     request = revision_prompt("Policy: bill at PO terms; log every change.")
@@ -490,7 +527,7 @@ def test_the_revision_request_carries_the_notes():
 
 
 def test_approving_with_notes_hands_them_to_the_builder(tmp_path, monkeypatch):
-    """"Approve, and also do X" must reach the builder, not only the audit log."""
+    """Notes given with an approval reach the builder, not only the audit log."""
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.types import Command
 
@@ -499,6 +536,7 @@ def test_approving_with_notes_hands_them_to_the_builder(tmp_path, monkeypatch):
     from odoo_miner.pipeline import graph as pipeline
 
     def fake_planner(run_dir, out, run="adhoc", feedback=None, agent=None):
+        """A stand-in planner that writes a plan without a model."""
         plan = Plan(decision="customize", summary="s", module_name="demo_mod")
         Path(out).write_text(plan.model_dump_json())
         return plan
@@ -522,6 +560,7 @@ def test_approving_with_notes_hands_them_to_the_builder(tmp_path, monkeypatch):
 
 
 def test_errors_accumulate_rather_than_overwrite():
+    """Errors from different nodes add up."""
     from odoo_miner.pipeline.state import _extend
 
     assert _extend(["a"], ["b"]) == ["a", "b"]
@@ -533,6 +572,7 @@ def test_errors_accumulate_rather_than_overwrite():
 
 
 def test_evaluators_score_gold_against_itself(gold):
+    """The gold labels score perfectly against themselves."""
     import run_evals
 
     reference = {"segments": [s.model_dump() for s in gold.segments]}
@@ -541,6 +581,7 @@ def test_evaluators_score_gold_against_itself(gold):
 
 
 def test_boundary_f1_penalises_wrong_boundaries(gold):
+    """One big segment scores badly on boundaries but fully on coverage."""
     import run_evals
 
     reference = {"segments": [s.model_dump() for s in gold.segments]}
@@ -554,6 +595,7 @@ def test_boundary_f1_penalises_wrong_boundaries(gold):
 
 
 def test_coverage_catches_duplicates(gold):
+    """A step in two segments fails coverage."""
     import run_evals
 
     reference = {"segments": [s.model_dump() for s in gold.segments]}
@@ -562,6 +604,7 @@ def test_coverage_catches_duplicates(gold):
 
 
 def test_adjustments_evaluator_flags_a_two_point_move():
+    """A two-point move fails the evaluator; a one-point move passes."""
     import run_evals
 
     baseline = {"segments": [{"segment_id": "s01", "steps": [{"step_index": 1, "score": 2}]}]}
@@ -572,13 +615,10 @@ def test_adjustments_evaluator_flags_a_two_point_move():
 
 
 # ----------------------------------------------------------------- signal regressions
-#
-# Each of these covers a bug that shipped once: a search that silently matched
-# nothing, a signal that fired on the wrong half of its definition, and a
-# label comparison that could never be true.
 
 
 def test_normalise_label_handles_odoo_spelling():
+    """Labels compare without non-breaking spaces, extra spaces, case or a ?."""
     assert assessor.normalise_label("Sales\xa0Price?") == "sales price"
     assert assessor.normalise_label("  General   Information ") == "general information"
     assert assessor.normalise_label(None) == ""
@@ -604,6 +644,7 @@ def test_wasted_click_needs_both_halves(session, gold):
 
 
 def test_a_tab_click_is_not_also_wasted(session, gold):
+    """A tab click is not also counted as a wasted click."""
     assessment = assessor.assess_deterministic(session, gold)
     for seg in assessment.segments:
         for step in seg.steps:
@@ -615,12 +656,15 @@ def test_a_tab_click_is_not_also_wasted(session, gold):
 
 @pytest.mark.skipif(not odoo_source.source_available(), reason="vendor/odoo not cloned")
 class TestViewSearch:
+    """Searches of the real Odoo views."""
+
     def test_find_view_fields_actually_matches(self):
         """A view declares its model as element text, not as an attribute."""
         fields = odoo_source.find_view_fields("account.move")
-        assert len(fields) > 100, "the quoted-model search silently matched nothing"
+        assert len(fields) > 100, "no fields found on account.move"
 
     def test_find_view_fields_line_numbers_are_real(self):
+        """Each field's line number points at the field."""
         root = odoo_source.settings().odoo_source_abs
         for entry in odoo_source.find_view_fields("account.move", "invoice_date"):
             lines = (root / entry["file"]).read_text(
@@ -629,23 +673,26 @@ class TestViewSearch:
             assert f'name="{entry["field"]}"' in lines[entry["line"] - 1]
 
     def test_bill_date_is_found_and_conditionally_hidden(self):
+        """The bill date field is found, labelled and conditionally hidden."""
         entries = odoo_source.find_view_fields("account.move", "invoice_date")
         assert entries
         assert any(e["invisible"] for e in entries), "bill date is conditionally hidden"
         assert any(e["string"] == "Bill Date" for e in entries)
 
     def test_find_view_pages_returns_real_tabs(self):
+        """Notebook page labels are found."""
         pages = odoo_source.find_view_pages("product.template")
         assert "General Information" in pages
         assert "Purchase" in pages
 
     def test_page_labels_are_scoped_per_model(self, session):
-        """"Purchase" is a tab on product.template, not on purchase.order."""
+        """The Purchase tab belongs to product.template, not purchase.order."""
         labels = assessor.page_labels_for(session)
         assert "purchase" in labels.get("product.template", set())
         assert "purchase" not in labels.get("purchase.order", set())
 
     def test_hidden_fields_are_scoped_per_model(self, session):
+        """Hidden fields are found, keyed by model."""
         hidden = assessor.hidden_fields_for(session)
         assert isinstance(hidden, dict)
         assert hidden, "nothing resolved; the view search is broken"
@@ -664,7 +711,7 @@ class TestViewSearch:
         assert "general information" in tabs
 
     def test_hidden_field_catches_the_product_price(self, session, gold):
-        """The guide's example friction: price only reachable on the product form."""
+        """The product price, editable only on the product form, is a hidden field."""
         assessment = assessor.assess_deterministic(session, gold)
         by_index = {c.step_index: c for c in session.clicks}
         hidden = [
@@ -681,6 +728,7 @@ class TestViewSearch:
 
 @pytest.fixture
 def fake_source(tmp_path):
+    """A small stand-in for the Odoo source tree."""
     root = tmp_path / "odoo"
     models = root / "addons" / "purchase" / "models"
     models.mkdir(parents=True)
@@ -694,6 +742,7 @@ def fake_source(tmp_path):
 
 
 def test_citation_check_passes_real_citations(fake_source):
+    """Correct citations pass."""
     from odoo_miner.agents.planner import check_citations
 
     text = (
@@ -704,7 +753,7 @@ def test_citation_check_passes_real_citations(fake_source):
 
 
 def test_citation_check_flags_a_misfiled_identifier(fake_source):
-    """The planner once cited the product list view in the form-view file."""
+    """An identifier cited in a file that does not contain it is flagged."""
     from odoo_miner.agents.planner import check_citations
 
     text = "the list view (`product_template_tree_view`, `addons/product/views/product_views.xml`)"
@@ -713,6 +762,7 @@ def test_citation_check_flags_a_misfiled_identifier(fake_source):
 
 
 def test_citation_check_flags_missing_files_and_lines(fake_source):
+    """Missing files and lines past the end are flagged."""
     from odoo_miner.agents.planner import check_citations
 
     problems = check_citations(
@@ -724,7 +774,7 @@ def test_citation_check_flags_missing_files_and_lines(fake_source):
 
 
 def test_citation_check_reads_paths_under_the_planners_mount(fake_source):
-    """The planner sees Odoo at `/odoo/` and often cites it that way; those must be checked too."""
+    """Paths under the planner's /odoo/ mount are checked too."""
     from odoo_miner.agents.planner import check_citations
 
     assert check_citations(
@@ -735,12 +785,13 @@ def test_citation_check_reads_paths_under_the_planners_mount(fake_source):
 
 
 def test_unverified_citations_reach_the_plan_contract():
+    """Unverified citations are part of the plan contract."""
     plan = Plan(decision="no_change", summary="s", unverified_citations=["x"])
     assert Plan.model_validate_json(plan.model_dump_json()).unverified_citations == ["x"]
 
 
 def test_an_unfinished_run_resumes_instead_of_starting_over():
-    """A crash mid-pipeline must not re-run (and re-pay for) the finished stages."""
+    """After a crash, the stages that finished are not run again."""
     from typing import TypedDict
 
     from langgraph.checkpoint.memory import InMemorySaver
@@ -749,15 +800,19 @@ def test_an_unfinished_run_resumes_instead_of_starting_over():
     from odoo_miner.pipeline.graph import start_or_resume
 
     class State(TypedDict, total=False):
+        """The stages that have run."""
+
         done: list
 
     calls = {"first": 0, "second": 0}
 
     def first(state):
+        """A stage that always succeeds."""
         calls["first"] += 1
         return {"done": ["first"]}
 
     def second(state):
+        """A stage that fails once, like a network blip, then succeeds."""
         calls["second"] += 1
         if calls["second"] == 1:
             raise ConnectionError("network blip")
@@ -791,9 +846,12 @@ def test_checkpoints_restore_contract_types_under_strict_deserialization(tmp_pat
     monkeypatch.setenv("LANGGRAPH_STRICT_MSGPACK", "true")
 
     class State(TypedDict, total=False):
+        """One contract object to checkpoint."""
+
         draft: Any
 
     def node(state):
+        """Return a contract object for the checkpoint to store."""
         return {"draft": TracedSegmentDraft(segment_id="s01", kind="action", explanation="x")}
 
     graph = StateGraph(State)

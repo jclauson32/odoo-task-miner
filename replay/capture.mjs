@@ -38,6 +38,7 @@ if (!opts.recording) {
   process.exit(2);
 }
 
+/** The model, method and arguments of an Odoo RPC request. */
 function parseRpc(req) {
   const url = new URL(req.url());
   const call = { endpoint: url.pathname, model: null, method: null, args: null, kwargs: null };
@@ -58,8 +59,7 @@ function parseRpc(req) {
       call.kwargs = { action_id: p.action_id ?? null };
     }
     if (url.pathname.endsWith('/mail/message/post')) {
-      // Posting to the chatter writes a message on the record: record it as the
-      // message_post it is, not as nothing.
+      // A chatter post writes a message on the record.
       call.model = p.thread_model ?? null;
       call.method = 'message_post';
       call.args = p.thread_id != null ? [p.thread_id] : null;
@@ -75,23 +75,23 @@ function parseRpc(req) {
 // --- Selector choice --------------------------------------------------------
 //
 // The Recorder saves several alternative selectors per step, and the replay
-// library normally races them: whichever matches first gets clicked. That
-// breaks on Odoo when one alternative matches the wrong element, e.g. "a.focus"
-// is whatever menu item happened to be highlighted while recording, and
-// "aria/0.00" matches every empty price cell. Instead, we wait until some
-// alternative matches exactly one visible element and use the most meaningful
-// such selector, falling back to the library's race only if none is unique.
+// library races them. On Odoo one alternative can match the wrong element
+// ("a.focus", "aria/0.00"), so each step waits for one that matches exactly one
+// visible element, preferring the most meaningful, and only falls back to the
+// race when none is unique.
 
 const SELECTOR_STEPS = new Set(['click', 'doubleClick', 'hover', 'change']);
 
 // Classes that describe momentary UI state rather than identity.
 const STATE_CLASS = /\.(focus|active|show|hover|o_hover|selected|o-hovered|o_selected_row)\b|:(focus|hover)\b/;
 
+/** A selector as one string: the last part of a chain. */
 function selectorKind(sel) {
   const last = Array.isArray(sel) ? sel[sel.length - 1] : sel;
   return String(last);
 }
 
+/** How meaningful a selector is, lower being better, or null if it must not be used. */
 function rankSelector(sel) {
   const s = selectorKind(sel);
   if (s.startsWith('aria/')) {
@@ -108,6 +108,7 @@ function rankSelector(sel) {
   return 3;
 }
 
+/** How many visible elements a selector matches. */
 async function countVisible(page, sel) {
   try {
     const handles = await page.$$(selectorToPElementSelector(sel));
@@ -122,6 +123,7 @@ async function countVisible(page, sel) {
   }
 }
 
+/** The best selector that matches exactly one visible element, or null. */
 async function pickSelector(page, selectors, timeoutMs) {
   const ranked = selectors
     .map((sel) => ({ sel, rank: rankSelector(sel) }))
@@ -145,7 +147,9 @@ async function pickSelector(page, selectors, timeoutMs) {
   return null;
 }
 
+/** Replay extension that records Odoo RPCs per step and picks unambiguous selectors. */
 class NetworkCapture extends PuppeteerRunnerExtension {
+  /** `settleMs`: how long the RPCs must be quiet before a step counts as done. */
   constructor(browser, page, options, settleMs) {
     super(browser, page, options);
     this.settleMs = settleMs;
@@ -156,10 +160,10 @@ class NetworkCapture extends PuppeteerRunnerExtension {
     this.lastRpcActivity = 0;
   }
 
-  // Wait until no Odoo backend call is in flight and none has started for
-  // `settleMs`. Only RPCs count: Odoo keeps other connections open (live chat
-  // bus, service worker), so "network idle" for the whole page rarely happens
-  // and would make every step wait for the full timeout.
+  /**
+   * Wait until no Odoo RPC is in flight and none has started for `settleMs`.
+   * Only RPCs count, since Odoo keeps other connections open.
+   */
   async waitForRpcIdle() {
     const deadline = Date.now() + this.timeout;
     const start = Date.now();
@@ -170,6 +174,7 @@ class NetworkCapture extends PuppeteerRunnerExtension {
     }
   }
 
+  /** Start recording every Odoo RPC, with its status and any error. */
   async beforeAllSteps(flow) {
     await super.beforeAllSteps(flow);
     this.page.on('request', (req) => {
@@ -207,11 +212,13 @@ class NetworkCapture extends PuppeteerRunnerExtension {
     });
   }
 
+  /** Tag the calls that follow with this step's index in the original recording. */
   async beforeEachStep(step, flow) {
     this.currentStep = originalIndex.get(step) ?? flow.steps.indexOf(step);
     await super.beforeEachStep(step, flow);
   }
 
+  /** Run a step with the selector pickSelector chose, when it chose one. */
   async runStep(step, flow) {
     if (SELECTOR_STEPS.has(step.type) && Array.isArray(step.selectors) && !step.frame?.length) {
       const chosen = await pickSelector(this.page, step.selectors, this.timeout);
@@ -221,6 +228,7 @@ class NetworkCapture extends PuppeteerRunnerExtension {
     return super.runStep(step, flow);
   }
 
+  /** Let the step's RPCs settle, then save a screenshot if asked to. */
   async afterEachStep(step, flow) {
     await super.afterEachStep(step, flow);
     // Let late requests (onchange, autosave) land on this step, not the next.
@@ -253,6 +261,7 @@ const originalIndex = new Map(kept.map((k) => [k.step, k.index]));
 // failed; note them instead of letting Node crash before the log is written.
 process.on('unhandledRejection', (e) => console.error('(ignored late error)', e?.message ?? e));
 
+/** `promise`, or undefined once `ms` milliseconds have passed. */
 const withTimeout = (promise, ms) =>
   Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
 

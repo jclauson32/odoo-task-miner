@@ -1,9 +1,7 @@
 """segmenter_agent: group clicks into segments that each accomplish one thing.
 
-Code first, LLM second. Everything that can be computed - which steps are
-noise, where a write or a screen change suggests a boundary, how to render the
-session compactly - is computed here. The model only decides where the
-boundaries actually fall and what to call each segment.
+Noise, boundary hints and the compact rendering are computed here; the model
+only decides where segments start and end, and what to call them.
 """
 
 from __future__ import annotations
@@ -15,16 +13,17 @@ from ..models import Session, SessionClick
 from .config import chat_model, load_prompt, trace_config
 from .contracts import SegmentLog
 
-# keyDown steps that carry no intent of their own. Enter is meaningful (it
-# submits), Tab only moves focus.
+# Keys that only move focus. Enter is not one of them: it submits.
 NOISE_KEYS = {"Tab"}
 
 
 def is_noise(click: SessionClick) -> bool:
+    """Whether a step is a keypress that only moves focus."""
     return click.type in ("keyDown", "keyUp") and click.key in NOISE_KEYS
 
 
 def target_text(click: SessionClick) -> str:
+    """The most readable name for what a step acted on."""
     t = click.target
     if not t:
         return click.url or ""
@@ -32,11 +31,9 @@ def target_text(click: SessionClick) -> str:
 
 
 def boundary_hints(session: Session) -> dict[int, list[str]]:
-    """Structural hints about where segments start and end.
+    """Hints for the prompt about where segments may start and end.
 
-    These are hints for the prompt, not decisions: a write usually ends a
-    segment, an action load or a change of model usually starts one, and an
-    RPC error marks a failed attempt.
+    Screen loads, model changes, writes and RPC errors are marked per step.
     """
     hints: dict[int, list[str]] = {}
     last_model: str | None = None
@@ -99,13 +96,14 @@ def render_session(session: Session) -> str:
 
 
 def expected_indexes(session: Session, include_noise: bool = False) -> list[int]:
+    """The step indexes a segmentation has to cover."""
     return [
         c.step_index for c in session.clicks if include_noise or not is_noise(c)
     ]
 
 
 def validate_segment_log(log: SegmentLog, session: Session) -> list[str]:
-    """Check the model's segmentation against the session. Empty list = valid."""
+    """Problems with a segmentation; an empty list means it is valid."""
     problems: list[str] = []
     want = expected_indexes(session)
     got = [i for s in log.segments for i in s.step_indexes]
@@ -139,11 +137,7 @@ def validate_segment_log(log: SegmentLog, session: Session) -> list[str]:
 
 
 def reattach_noise(log: SegmentLog, session: Session) -> SegmentLog:
-    """Put dropped noise steps back, in the segment of the step before them.
-
-    The model never sees noise steps, but the contract says every step in the
-    session belongs to exactly one segment.
-    """
+    """Put the dropped noise steps back, each in the segment of the step before it."""
     owner: dict[int, str] = {
         i: seg.segment_id for seg in log.segments for i in seg.step_indexes
     }
@@ -171,7 +165,7 @@ def reattach_noise(log: SegmentLog, session: Session) -> SegmentLog:
 
 
 def build_segmenter(model: str | None = None):
-    """The LangChain agent. One focused judgement, validated structured output."""
+    """The segmenter agent: one judgement, returned as a validated SegmentLog."""
     from langchain.agents import create_agent
 
     return create_agent(
@@ -189,9 +183,9 @@ def run_segmenter(
     run: str = "adhoc",
     retries: int = 1,
 ) -> SegmentLog:
-    """Segment a session. Retries once with the validation errors appended.
+    """Segment a session, retrying once with the validation errors if it is invalid.
 
-    `agent` is injectable so tests can run without an API key.
+    `agent` can be a stand-in, so tests need no API key.
     """
     agent = agent or build_segmenter()
     rendered = render_session(session)
@@ -228,6 +222,7 @@ def run_segmenter(
 
 
 def run_segmenter_path(session_path: Path, out: Path, agent: Any = None, run: str = "adhoc") -> SegmentLog:
+    """Segment a session file and write segments.json."""
     session = Session.model_validate_json(Path(session_path).read_text(encoding="utf-8"))
     log = run_segmenter(session, agent=agent, run=run)
     out.parent.mkdir(parents=True, exist_ok=True)

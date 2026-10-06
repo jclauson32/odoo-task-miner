@@ -1,7 +1,7 @@
 """Parse Chrome DevTools Recorder exports (JSON) into a flat list of clicks.
 
 Recorder format reference: https://github.com/puppeteer/replay (src/Schema.ts).
-Note the format records the order of steps but no timestamps.
+The format records the order of steps but no timestamps.
 """
 
 from __future__ import annotations
@@ -24,23 +24,23 @@ BROWSER_PAGE = re.compile(r"^(chrome|about|edge|brave|chrome-search):")
 
 _NAME_ATTR = re.compile(r"\[name=['\"]?([\w.\-]+)['\"]?\]")
 
-# Values typed into fields like these are replaced at ingest. The analysis never
-# needs them, and clicks.json / session.json are sent to the model and stored in
-# traces. Replay reads the original recording, so it can still log in.
+# Values typed into these fields are redacted at ingest, because the analysis
+# files are sent to the model. Replay reads the original recording.
 SECRET_FIELD = re.compile(r"passw(or)?d|\bpwd\b|passcode|secret|token|api[\s_-]?key|\botp\b|totp", re.I)
 REDACTED = "<redacted>"
 
 
 def is_secret_field(target: Target | None) -> bool:
+    """Whether a step targets a password, token or similar field."""
     return target is not None and bool(SECRET_FIELD.search(" ".join(target.selectors)))
 
 
 class RecordingError(ValueError):
-    pass
+    """A file that is not a usable Chrome Recorder export."""
 
 
 def _flatten_selector(selector: Any) -> str:
-    """A selector is a string, or a list of strings (ancestor chain through shadow roots/frames)."""
+    """One selector as a string; a chain through shadow roots or frames is joined with " >> "."""
     if isinstance(selector, list):
         return " >> ".join(str(s) for s in selector)
     return str(selector)
@@ -52,11 +52,9 @@ _ICON_GLYPHS = re.compile("[\ue000-\uf8ff]")
 
 
 def _aria_label(parts: list[str]) -> str | None:
-    """Readable accessible name from an aria selector chain.
+    """The nearest readable accessible name in an aria selector chain.
 
-    The Recorder often targets an icon inside a button, giving chains like
-    "aria/Save manually >> aria/[role="generic"]". The inner part has no name,
-    so walk outwards to the nearest part that does.
+    The Recorder often targets an icon inside a button, and the icon has no name.
     """
     for part in reversed(parts):
         if not part.startswith("aria/"):
@@ -68,6 +66,7 @@ def _aria_label(parts: list[str]) -> str | None:
 
 
 def parse_target(raw_selectors: list | None) -> Target | None:
+    """The element a step acted on, from the Recorder's selectors."""
     if not raw_selectors:
         return None
 
@@ -95,6 +94,7 @@ def parse_target(raw_selectors: list | None) -> Target | None:
 
 
 def _navigation_url(step: dict) -> str | None:
+    """The URL a step navigated to, from its asserted events."""
     for event in step.get("assertedEvents") or []:
         if event.get("type") == "navigation" and event.get("url"):
             return event["url"]
@@ -102,6 +102,7 @@ def _navigation_url(step: dict) -> str | None:
 
 
 def parse_recording(data: dict, source: str = "<memory>", keep_noise: bool = False) -> ClickLog:
+    """Turn a Recorder export into a click log, dropping setup and noise steps."""
     if not isinstance(data, dict) or not isinstance(data.get("steps"), list):
         raise RecordingError("Not a Chrome Recorder export: expected an object with a 'steps' list.")
 
@@ -154,6 +155,7 @@ def parse_recording(data: dict, source: str = "<memory>", keep_noise: bool = Fal
 
 
 def load_recording(path: Path, keep_noise: bool = False) -> ClickLog:
+    """Read and parse a Recorder export file."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -162,16 +164,13 @@ def load_recording(path: Path, keep_noise: bool = False) -> ClickLog:
 
 
 def _first_selector(step: dict) -> str | None:
+    """A step's first selector, used to match steps across copies of a recording."""
     selectors = step.get("selectors") or []
     return _flatten_selector(selectors[0]) if selectors else None
 
 
 def redact_recording(data: dict) -> dict:
-    """A copy of a recording with every value typed into a secret field replaced.
-
-    This is the copy an agent may read and edit; `rehydrate_secrets` puts the
-    real values back just before a replay.
-    """
+    """A copy of a recording with secret values redacted, safe to give an agent."""
     out = copy.deepcopy(data)
     for step in out.get("steps", []):
         if step.get("value") is not None and is_secret_field(parse_target(step.get("selectors"))):
@@ -180,10 +179,9 @@ def redact_recording(data: dict) -> dict:
 
 
 def rehydrate_secrets(recording: dict, original: dict) -> dict:
-    """Restore redacted values from the original recording, matched by the step's first selector.
+    """Put redacted values back from the original recording, matching steps by first selector.
 
-    Raises RecordingError when a redacted value has no counterpart, rather than
-    replaying a login with the literal text "<redacted>".
+    Raises RecordingError if a redacted value has no match.
     """
     secrets = {
         _first_selector(step): step["value"]

@@ -1,8 +1,6 @@
 """tracer_agent: link each segment to the backend code that ran.
 
-The read/write split is already computed by `merge`. What is left is locating
-and explaining backend code, which is tool use in a loop - so the
-deterministic resolver below does the finding, and the agent reads the code
+A resolver in code finds the methods behind each write; the agent reads them
 and writes the explanation.
 """
 
@@ -38,6 +36,7 @@ RETRIEVAL_METHODS = {
 
 
 def segment_clicks(session: Session, step_indexes: list[int]) -> list[SessionClick]:
+    """The clicks that belong to a segment."""
     wanted = set(step_indexes)
     return [c for c in session.clicks if c.step_index in wanted]
 
@@ -47,7 +46,6 @@ def classify_segment(clicks: list[SessionClick]) -> SegmentKind:
     kinds = {call.kind for click in clicks for call in click.calls}
     wrote = "write" in kinds
     read = bool(kinds & {"read", "compute"})
-    moved = "action_load" in kinds
 
     if wrote and read:
         return "mixed"
@@ -55,8 +53,6 @@ def classify_segment(clicks: list[SessionClick]) -> SegmentKind:
         return "action"
     if read:
         return "retrieval"
-    if moved:
-        return "navigation"
     return "navigation"
 
 
@@ -87,6 +83,7 @@ def retrievals_for(clicks: list[SessionClick]) -> list[QueryRef]:
 
 
 def _first_list(args: list | None) -> list | None:
+    """The first list among a call's positional arguments."""
     if not args:
         return None
     for arg in args:
@@ -101,10 +98,9 @@ def action_calls(clicks: list[SessionClick]) -> list[NetworkCall]:
 
 
 def resolve_actions(clicks: list[SessionClick]) -> list[CodeRef]:
-    """Code behind each write call, by searching the Odoo source.
+    """The code behind each write call, found by searching Odoo's source.
 
-    Returns an empty list when the source checkout is missing, so the stage
-    still runs - the agent is told the references could not be resolved.
+    Empty when the source checkout is missing; the agent is told so.
     """
     if not odoo_source.source_available():
         return []
@@ -171,13 +167,9 @@ def render_segment(segment, clicks: list[SessionClick], refs: list[CodeRef], que
 
 
 def tracer_middleware() -> list:
-    """Prompt caching for the tracer's tool loop.
+    """Prompt caching for the tracer's tool loop, which re-sends its context every turn.
 
-    Each segment is a loop that re-sends the whole conversation, source it has
-    read included, on every turn; without caching that input is billed in
-    full each time. The single-shot stages (segmenter, assessor) do not get
-    this: their prompts are under the minimum cacheable length, and a cache
-    write that is never read costs 25% more than no cache at all.
+    The single-shot stages are below the minimum cacheable length, so they go without.
     """
     from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
 
@@ -213,9 +205,8 @@ def trace_segment(segment, session: Session, agent: Any = None, run: str = "adho
     if not isinstance(draft, TracedSegmentDraft):
         draft = TracedSegmentDraft.model_validate(draft)
 
-    # The agent may correct the kind and the explanation, but references it
-    # invented are dropped: a CodeRef has to exist on disk. Retrievals are the
-    # ones computed from the session, not anything the model retyped.
+    # Keep the agent's kind and explanation, but only code references that exist
+    # on disk. Retrievals come from the session.
     good, _bad = verify_refs(draft.actions)
     return TracedSegment(
         segment_id=segment.segment_id,
@@ -227,6 +218,7 @@ def trace_segment(segment, session: Session, agent: Any = None, run: str = "adho
 
 
 def run_tracer(segments: SegmentLog, session: Session, agent: Any = None, run: str = "adhoc") -> TraceLog:
+    """Trace every segment of a session."""
     agent = agent or build_tracer()
     traced = [trace_segment(s, session, agent=agent, run=run) for s in segments.segments]
     return TraceLog(session=session.source, segments=traced)
@@ -235,6 +227,7 @@ def run_tracer(segments: SegmentLog, session: Session, agent: Any = None, run: s
 def run_tracer_path(
     segments_path: Path, session_path: Path, out: Path, agent: Any = None, run: str = "adhoc"
 ) -> TraceLog:
+    """Trace a segments file and write traces.json."""
     segments = SegmentLog.model_validate_json(Path(segments_path).read_text(encoding="utf-8"))
     session = Session.model_validate_json(Path(session_path).read_text(encoding="utf-8"))
     log = run_tracer(segments, session, agent=agent, run=run)

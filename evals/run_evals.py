@@ -26,10 +26,8 @@ from odoo_miner.agents.contracts import SegmentLog  # noqa: E402
 from odoo_miner.agents.segmenter import run_segmenter  # noqa: E402
 from odoo_miner.models import Session  # noqa: E402
 
-# Each dataset mirrors these entries exactly: `push` updates matching examples,
-# creates missing ones and deletes any others, so this file is the source of
-# truth. Paths are relative to the repository; the gold labels describe the
-# committed session they sit next to. Add a recording by adding an entry.
+# The source of truth for the LangSmith datasets: `push` makes each dataset match
+# these entries. Paths are relative to the repository.
 DATASETS = {
     "odoo-miner/segmenter": [
         {
@@ -242,11 +240,13 @@ def push_datasets() -> None:
 
 
 def evaluate_segmenter(prefix: str = "segmenter-v1") -> None:
+    """Run the segmenter over its LangSmith dataset and score it."""
     from langsmith import Client
 
     client = Client()
 
     def target(inputs: dict) -> dict:
+        """Segment one example's session."""
         session = Session.model_validate_json(
             (ROOT / inputs["session_path"]).read_text(encoding="utf-8")
         )
@@ -293,6 +293,7 @@ def check_offline() -> int:
 
 
 def main() -> int:
+    """Run the command given on the command line."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command", choices=["push", "segmenter", "check"], help="what to run"

@@ -1,7 +1,6 @@
 """Tests for the tools the builder uses to install, test, replay and measure a module.
 
-No Docker and no Odoo: the commands are replaced by a recorder, which is
-enough to check what is run and in what order - the part that was wrong.
+Commands are replaced by a recorder, so no Docker or Odoo is needed.
 """
 
 from __future__ import annotations
@@ -27,6 +26,7 @@ GOLD = ROOT / "evals/datasets/rfq_to_payment.segments.json"
 
 
 def test_redacting_a_recording_hides_only_secrets_and_round_trips():
+    """Redaction hides the password, keeps the login name, and can be undone."""
     original = json.loads(RECORDING.read_text())
     redacted = redact_recording(original)
     values = [s.get("value") for s in redacted["steps"] if s.get("value") is not None]
@@ -35,12 +35,14 @@ def test_redacting_a_recording_hides_only_secrets_and_round_trips():
 
 
 def test_a_redacted_value_without_an_original_is_an_error_not_a_login_attempt():
+    """A redacted value with no original raises instead of being typed in."""
     redacted = {"steps": [{"type": "change", "value": REDACTED, "selectors": [["#password"]]}]}
     with pytest.raises(RecordingError, match="No original value"):
         rehydrate_secrets(redacted, {"steps": []})
 
 
 def test_run_keeps_a_redacted_copy_of_its_recording(tmp_path):
+    """`run` saves a redacted copy of the recording and the original's path."""
     result = CliRunner().invoke(app, ["run", str(RECORDING), "-d", str(tmp_path), "--skip-replay"])
     assert result.exit_code == 0, result.output
     kept = json.loads((tmp_path / "recording.json").read_text())
@@ -61,6 +63,7 @@ def test_run_keeps_a_redacted_copy_of_its_recording(tmp_path):
      "1 failed"),
 ])
 def test_module_tests_pass_only_when_tests_actually_ran(monkeypatch, tmp_path, log, verdict):
+    """Tests pass only when Odoo reports at least one test and no failures."""
     commands = []
     monkeypatch.setattr(odoo_ops, "_run", lambda cmd, **kw: (commands.append(cmd), (0, log))[1])
     result = odoo_ops.run_module_tests("demo_mod", run_dir=str(tmp_path))
@@ -70,8 +73,7 @@ def test_module_tests_pass_only_when_tests_actually_ran(monkeypatch, tmp_path, l
 
 
 def test_odoo_is_stopped_while_a_module_installs_or_tests():
-    """A running server loading the same database collided with the install
-    ("could not serialize access due to concurrent update") in a real build."""
+    """Both scripts stop Odoo's web server before the install, and start it after."""
     for script in (odoo_ops.INSTALL_SCRIPT, odoo_ops.TEST_SCRIPT):
         text = Path(script).read_text()
         stop, run = text.index("docker compose stop odoo"), text.index("docker compose run --rm odoo odoo")
@@ -85,6 +87,7 @@ def test_odoo_is_stopped_while_a_module_installs_or_tests():
 
 
 def test_replay_restores_then_installs_then_replays_with_secrets_restored(monkeypatch, tmp_path):
+    """The replay restores, installs, then replays with the real password."""
     original = tmp_path / "original.json"
     original.write_text(RECORDING.read_text())
     after = tmp_path / "after_recording.json"
@@ -93,6 +96,7 @@ def test_replay_restores_then_installs_then_replays_with_secrets_restored(monkey
     order, replayed = [], {}
 
     def fake_run(cmd, **kw):
+        """Record each command instead of running it."""
         if cmd[:2] == ["bash", odoo_ops.RESTORE_HOOK]:
             order.append("restore")
         elif cmd == ["bash", odoo_ops.INSTALL_SCRIPT, "demo_mod"]:
@@ -117,6 +121,7 @@ def test_replay_restores_then_installs_then_replays_with_secrets_restored(monkey
 
 
 def test_effort_is_compared_the_same_way_on_both_sides(tmp_path):
+    """The same session scores the same before and after."""
     for side in ("before", "after"):
         folder = tmp_path / side
         folder.mkdir()
@@ -130,6 +135,7 @@ def test_effort_is_compared_the_same_way_on_both_sides(tmp_path):
 
 
 def test_a_failing_tool_reports_the_error_instead_of_ending_the_run():
+    """A tool's exception comes back to the model as an error message."""
     from odoo_miner.agents.tools.errors import reports_errors
 
     def read_thing(path: str) -> str:
@@ -147,6 +153,7 @@ def test_an_approval_pause_is_never_swallowed():
     from odoo_miner.agents.tools.errors import reports_errors
 
     def gated() -> str:
+        """A tool that pauses for approval."""
         raise GraphInterrupt(())
 
     with pytest.raises(GraphInterrupt):
@@ -154,6 +161,7 @@ def test_an_approval_pause_is_never_swallowed():
 
 
 def test_wrapped_tools_keep_the_schema_the_model_sees():
+    """Wrapping keeps each tool's signature, arguments and docstring."""
     import inspect
 
     from langchain_core.tools import tool as as_tool
@@ -168,6 +176,7 @@ def test_wrapped_tools_keep_the_schema_the_model_sees():
 
 
 def test_unknown_tool_names_are_refused():
+    """Asking for a tool that does not exist is an error."""
     from odoo_miner.agents.tools import odoo_source
 
     with pytest.raises(ValueError, match="Unknown tools"):

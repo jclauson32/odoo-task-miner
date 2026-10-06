@@ -93,6 +93,8 @@ class NetworkLog(BaseModel):
 
 
 class SessionClick(Click):
+    """A click with the backend calls it triggered."""
+
     calls: list[NetworkCall] = Field(default_factory=list)
     has_write: bool = False
 

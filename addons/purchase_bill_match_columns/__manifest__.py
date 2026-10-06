@@ -1,3 +1,4 @@
+# License LGPL-3 (https://www.gnu.org/licenses/lgpl-3.0).
 {
     'name': 'Purchase Bill Match Columns',
     'version': '18.0.1.0.0',

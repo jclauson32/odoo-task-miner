@@ -1,8 +1,10 @@
-# -*- coding: utf-8 -*-
+"""Read-only purchase order columns on vendor bill lines."""
 from odoo import fields, models
 
 
 class AccountMoveLine(models.Model):
+    """Bill lines showing their purchase order line's quantity, receipts and price."""
+
     _inherit = 'account.move.line'
 
     po_line_product_qty = fields.Float(

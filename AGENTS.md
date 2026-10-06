@@ -76,6 +76,16 @@ python evals/run_evals.py check
 Newest first. One entry per working session: date, who, what changed, what's
 next, anything surprising.
 
+- 2026-10-05 (evening): Code cleanup. Every module, class and function has a
+  docstring, tests included; long docstrings and comments were cut, and
+  comments that narrated old bugs were removed (git history has them). Dead
+  code removed: `odoo_ops.TOOLS`, the module-level graph in
+  `pipeline/graph.py` (Studio loads `pipeline/studio.py`), a config alias.
+  The assessor's shared variant/template lookup is one helper; offline scores
+  for four sessions came out byte-identical. Tests now always use the
+  committed session fixture. The two PR modules got the same pass on their
+  branches and still pass in Odoo (10/10, 3/3). Tool docstrings and contract
+  docstrings are model-facing - change them as carefully as prompts.
 - 2026-10-05 (later): Automated a process that a written policy decides, end
   to end. Recorded `recordings/bill-exception-resolution.json` (an AP clerk on
   all four seeded exceptions; `capture.mjs` now records chatter posts). The

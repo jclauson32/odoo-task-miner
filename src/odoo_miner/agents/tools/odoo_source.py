@@ -1,8 +1,4 @@
-"""Finding things in Odoo's source.
-
-Plain functions, also handed to agents as tools. Everything here is
-deterministic: locating a method is a search, not a judgement, so the agent
-only has to read and explain what these return.
+"""Search Odoo's source: plain functions that the agents also use as tools.
 
 The source is a read-only checkout (`ODOO_SOURCE`, default `vendor/odoo`):
 
@@ -35,6 +31,7 @@ class SourceUnavailable(RuntimeError):
 
 
 def source_root() -> Path:
+    """The source checkout; raises SourceUnavailable if it is missing."""
     root = settings().odoo_source_abs
     if not root.exists():
         raise SourceUnavailable(
@@ -45,6 +42,7 @@ def source_root() -> Path:
 
 
 def source_available() -> bool:
+    """Whether the source checkout exists."""
     return settings().odoo_source_abs.exists()
 
 
@@ -54,15 +52,15 @@ def module_of(path: Path, root: Path) -> str:
         parts = path.relative_to(root).parts
     except ValueError:
         return ""
-    for marker in ("addons",):
-        if marker in parts:
-            i = parts.index(marker)
-            if i + 1 < len(parts):
-                return parts[i + 1]
+    if "addons" in parts:
+        i = parts.index("addons")
+        if i + 1 < len(parts):
+            return parts[i + 1]
     return parts[0] if parts else ""
 
 
 def relative(path: Path, root: Path) -> str:
+    """`path` relative to `root`, or unchanged when it is outside it."""
     try:
         return str(path.relative_to(root))
     except ValueError:
@@ -83,6 +81,7 @@ def _grep_files(pattern: str, root: Path, include: str = "*.py") -> list[Path]:
 
 
 def _safe_read(path: Path) -> str:
+    """A file's text, or "" when it cannot be read."""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -114,6 +113,7 @@ def model_names(cls: ast.ClassDef) -> set[str]:
 
 
 def _methods_in(cls: ast.ClassDef, method: str) -> Iterable[ast.FunctionDef]:
+    """The definitions of `method` in a class body."""
     for stmt in cls.body:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name == method:
             yield stmt
@@ -282,12 +282,7 @@ def find_view_fields(model: str, field: str | None = None) -> list[dict]:
     """Where a model's views put its fields, and what hides them.
 
     Used to tell whether a field the user edited was behind a notebook page or
-    conditionally invisible - both make a step harder than it looks.
-
-    A view declares its model as element text (`<field name="model">a.b</field>`),
-    not as an attribute, and one XML file usually holds views for several
-    models - so this matches on the element form and scopes each scan to the
-    `<record>` that declares the model asked for.
+    conditionally invisible.
 
     Args:
         model: Odoo model name, e.g. "account.move".
@@ -299,6 +294,8 @@ def find_view_fields(model: str, field: str | None = None) -> list[dict]:
         invisible (the modifier, if any).
     """
     root = source_root()
+    # Views declare their model as element text, and one file often holds views
+    # for several models, so each <record> is scanned on its own.
     declaration = f'name="model">{model}<'
     out: list[dict] = []
 
@@ -358,18 +355,16 @@ INSTALLED_MODULES_TTL = 6 * 3600
 
 
 def _modules_cache() -> Path:
+    """Where this database's installed-module list is cached."""
     return Path("out") / ".cache" / f"installed_modules.{settings().odoo_db}.json"
 
 
 @lru_cache(maxsize=1)
 def installed_modules() -> frozenset[str]:
-    """Modules installed in the demo database, via the same JSON-RPC Odoo exposes.
+    """Modules installed in the demo database, asked over JSON-RPC.
 
-    Asked once per process and cached on disk for INSTALLED_MODULES_TTL, per
-    database. When Odoo is unreachable, an expired cache is still used - a
-    slightly old list filters better than none - and with no cache at all
-    the result is empty, so callers simply do not filter. A missing Odoo must
-    not turn a source search into an error.
+    Cached on disk for INSTALLED_MODULES_TTL. When Odoo cannot be reached, an
+    expired cache is used, or else an empty set, which callers take as "do not filter".
     """
     cache = _modules_cache()
     cached: frozenset[str] = frozenset()
@@ -390,12 +385,14 @@ def installed_modules() -> frozenset[str]:
 
 
 def _fetch_installed_modules() -> set[str]:
+    """Ask Odoo for its installed modules; empty when it cannot be reached."""
     import urllib.error
     import urllib.request
 
     s = settings()
 
     def call(service: str, method: str, args: list):
+        """One JSON-RPC call to Odoo."""
         payload = json.dumps({
             "jsonrpc": "2.0", "method": "call",
             "params": {"service": service, "method": method, "args": args},
@@ -428,9 +425,8 @@ def _fetch_installed_modules() -> set[str]:
 def find_view_pages(model: str) -> list[str]:
     """The notebook page labels a model's views define, e.g. "General Information".
 
-    A click on one of these is a tab switch. The Recorder records Odoo 18 tabs
-    as positional selectors (`div.o_content li:nth-of-type(1) > a`) with no
-    class to match on, so the label is the only reliable signal.
+    A click on one of these is a tab switch; Odoo 18's tabs have no class to
+    match on, so the label is the signal.
 
     Args:
         model: Odoo model name, e.g. "product.template".
@@ -456,10 +452,9 @@ _ALL = (find_method, find_button, read_source, find_view_fields, find_view_pages
 
 
 def agent_tools(*names: str) -> list:
-    """These functions as agent tools: errors come back as text instead of ending the run.
+    """The named functions as agent tools, all of them by default.
 
-    create_agent accepts plain callables; the docstrings above are the tool
-    descriptions the model reads. With no names, all of them.
+    Their docstrings are the descriptions the model reads; errors come back as text.
     """
     from .errors import reports_errors
 

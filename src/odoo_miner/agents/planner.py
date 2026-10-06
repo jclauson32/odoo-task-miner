@@ -1,9 +1,8 @@
 """planner_agent: decide whether to change the workflow, and plan the change.
 
-Open-ended work - explore Odoo's source, weigh options, keep a todo list,
-delegate research - so this is a Deep Agent rather than a single call. Odoo's
-source is mounted read-only; the run directory is writable so the agent can
-leave `plan.md` behind for a human.
+A Deep Agent, since the work is open-ended: it reads Odoo's source, weighs
+options and delegates research. Odoo's source is mounted read-only; the run
+folder is writable for `plan.md`.
 """
 
 from __future__ import annotations
@@ -28,13 +27,10 @@ _IDENTIFIER_WINDOW = 90
 
 
 def check_citations(text: str, root: Path | None = None) -> list[str]:
-    """Problems with the source citations in a plan. Empty when all of them check out.
+    """Problems with the source citations in a plan; empty when they all check out.
 
-    Checks what can be checked mechanically: the cited file exists, a cited
-    line or range falls inside it, and the backticked identifier written just
-    before a path (an XML id, a method) actually occurs in that file. A clean
-    result does not make the reasoning right - judging that is the approver's
-    job - but a fabricated or mis-filed citation does not reach them unflagged.
+    Checks that each cited file exists, that cited lines fall inside it, and that
+    the backticked identifier just before a path occurs in that file.
     """
     root = root or (odoo_source.settings().odoo_source_abs if odoo_source.source_available() else None)
     if root is None:
@@ -75,7 +71,7 @@ PLAN_PROMPT = (
 
 
 def build_planner(run_dir: Path, model: str | None = None):
-    """The deep agent. `/odoo/` is read-only; `/run/` is the run's artifacts."""
+    """The planner deep agent. `/odoo/` is read-only; `/run/` is the run folder."""
     from deepagents import FilesystemPermission, create_deep_agent
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
 
@@ -163,6 +159,7 @@ def run_planner(
 def run_planner_path(
     run_dir: Path, out: Path, agent: Any = None, run: str = "adhoc", feedback: str | None = None
 ) -> Plan:
+    """Plan a run and write plan.json."""
     plan = run_planner(run_dir, agent=agent, run=run, feedback=feedback)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)

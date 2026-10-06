@@ -69,6 +69,7 @@ class Odoo:
     """Minimal JSON-RPC client (handles None return values, unlike XML-RPC)."""
 
     def __init__(self, url: str, db: str, user: str, password: str):
+        """Log in, or exit with the reason."""
         self.url = url.rstrip("/") + "/jsonrpc"
         self.db, self.password = db, password
         self._ids = itertools.count(1)
@@ -77,6 +78,7 @@ class Odoo:
             sys.exit(f"Login failed for {user} on database {db}.")
 
     def _call(self, service: str, method: str, *args):
+        """One JSON-RPC call; exits if Odoo cannot be reached."""
         payload = json.dumps({
             "jsonrpc": "2.0", "method": "call", "id": next(self._ids),
             "params": {"service": service, "method": method, "args": args},
@@ -93,16 +95,19 @@ class Odoo:
         return body["result"]
 
     def __call__(self, model: str, method: str, *args, **kwargs):
+        """Call `method` on `model`, like `execute_kw`."""
         return self._call("object", "execute_kw", self.db, self.uid, self.password,
                           model, method, list(args), kwargs)
 
 
 def get_or_create(odoo: Odoo, model: str, domain: list, values: dict) -> int:
+    """The id of the first record matching `domain`, created from `values` if none does."""
     found = odoo(model, "search", domain, limit=1)
     return found[0] if found else odoo(model, "create", [values])[0]
 
 
 def receive(odoo: Odoo, po_id: int, qty: float, keep_backorder: bool) -> None:
+    """Validate a purchase order's receipt for `qty`, keeping a backorder for the rest if asked."""
     picking_ids = odoo("purchase.order", "read", [po_id], ["picking_ids"])[0]["picking_ids"]
     if len(picking_ids) != 1:
         raise RuntimeError(f"Expected one receipt for PO {po_id}, found {len(picking_ids)}.")
@@ -118,6 +123,7 @@ def receive(odoo: Odoo, po_id: int, qty: float, keep_backorder: bool) -> None:
 
 
 def seed(odoo: Odoo) -> list[dict]:
+    """Create each scenario that does not exist yet: vendor, product, PO, receipt and draft bill."""
     vendor_ids = {
         key: get_or_create(odoo, "res.partner", [("name", "=", name)],
                            {"name": name, "is_company": True, "supplier_rank": 1})
@@ -204,6 +210,7 @@ def verify(odoo: Odoo) -> None:
 
 
 def main() -> None:
+    """Seed the database given on the command line, then print what it holds."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default=os.environ.get("ODOO_URL", "http://localhost:8069"))
     parser.add_argument("--db", default=os.environ.get("ODOO_DB", "demo"))

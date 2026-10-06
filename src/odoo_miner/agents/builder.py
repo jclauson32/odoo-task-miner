@@ -1,13 +1,9 @@
 """builder_agent: implement the approved plan, prove it works, deliver it.
 
-Long multi-step work with file edits, so a Deep Agent. Its filesystem is
-scoped to the new module and the run directory - it cannot write anywhere
-else - and every tool that sends work out of the machine pauses for a person.
-
-The agent sees virtual paths (`/run/plan.md`, `/addons/<module>/...`), the
-same ones its filesystem tools use. Its Odoo and delivery tools are bound to
-this run: they translate those paths to real ones, and they only ever act on
-the module the person approved.
+A Deep Agent that can write only to the new module and the run folder. Its
+tools are bound to this run and module, and take the same virtual paths as its
+filesystem (`/run/...`, `/addons/<module>/...`). Every tool that sends work out
+of the machine pauses for approval.
 """
 
 from __future__ import annotations
@@ -53,6 +49,7 @@ def path_resolver(run_dir: Path, module_dir: Path, module: str) -> Callable[[str
     routes = {"/run/": Path(run_dir).resolve(), f"/addons/{module}/": Path(module_dir).resolve()}
 
     def resolve(path: str) -> str:
+        """The real path for `path`; raises ValueError if it escapes its root."""
         for prefix, root in routes.items():
             if path == prefix.rstrip("/") or path.startswith(prefix):
                 target = (root / path[len(prefix):]).resolve() if path.startswith(prefix) else root
@@ -69,6 +66,7 @@ def bound_tools(run_dir: Path, module_dir: Path, module: str) -> list[Callable[.
     resolve = path_resolver(run_dir, module_dir, module)
 
     def _same_module(requested: str) -> str | None:
+        """A refusal when `requested` is not the approved module."""
         if requested != module:
             return f"refusing: the approved plan is for {module!r}, not {requested!r}."
         return None
@@ -142,7 +140,7 @@ def bound_tools(run_dir: Path, module_dir: Path, module: str) -> list[Callable[.
 
 
 def build_builder(run_dir: Path, plan: Plan, model: Any = None):
-    """The deep agent, scoped to one module."""
+    """The builder deep agent, scoped to one module."""
     from deepagents import FilesystemPermission, create_deep_agent
     from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
 
@@ -174,8 +172,7 @@ def build_builder(run_dir: Path, plan: Plan, model: Any = None):
         permissions=[
             FilesystemPermission(operations=["write"], paths=["/odoo/**"], mode="deny")
         ],
-        # A person approves each push, pull request and email, even after
-        # approving the plan.
+        # Each push, pull request and email is approved on its own, after the plan.
         interrupt_on={name: True for name in GATED_TOOLS},
         response_format=BuildResult,
         name="builder_agent",
@@ -206,6 +203,7 @@ def run_builder_path(
     run: str = "adhoc",
     notes: str | None = None,
 ) -> BuildResult:
+    """Build the plan in `plan_path` and write build.json."""
     plan = Plan.model_validate_json(Path(plan_path).read_text(encoding="utf-8"))
     built = run_builder(run_dir, plan, agent=agent, run=run, notes=notes)
     out = Path(out)

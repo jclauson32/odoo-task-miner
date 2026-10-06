@@ -1,8 +1,7 @@
-"""The findings report: what the analysis found, for the person who owns the process.
+"""The findings report for the person who owns the process.
 
-Composed entirely from a run's artifacts - no model call - so the email says
-exactly what the files say. Screenshots are chosen in code: the steps where
-the user hit an error or had to work through a dialog.
+Built from a run's files with no model call. The screenshots are the steps
+where the user hit an error or a dialog.
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ FRICTION_SIGNALS = ("error", "modal")
 
 
 def _title(run_dir: Path) -> str:
+    """The workflow's title from the session, or the run folder's name."""
     session = run_dir / "session.json"
     if session.exists():
         data = json.loads(session.read_text(encoding="utf-8"))

@@ -1,15 +1,9 @@
 """Tools that send work out of the machine: a branch, a pull request, an email.
 
-The builder gates all three with `interrupt_on`, so a person approves each one
-even after approving the plan. They also refuse on their own:
-
-- module names are validated before they reach a path or a git ref;
-- nothing is pushed to the base branch - only `feat/<module>`;
-- the push never touches the caller's working tree: it commits in a
-  temporary git worktree, so your branch, index and uncommitted work stay put;
-- email only goes to `REPORT_EMAIL_TO`, which the caller cannot override.
-
-Every attempt, successful or not, is written to the audit log.
+The builder pauses for approval before each one, and they also refuse on their
+own: module names are validated, nothing is pushed to the base branch, the push
+commits in a temporary worktree so the caller's checkout is untouched, and
+email only goes to `REPORT_EMAIL_TO`. Every attempt is written to the audit log.
 """
 
 from __future__ import annotations
@@ -60,6 +54,7 @@ def validate_module(module: str) -> str | None:
 
 
 def _git(repo: Path, *args: str, timeout: int = GIT_TIMEOUT) -> tuple[int, str]:
+    """Run git in `repo`; return its exit code and output."""
     try:
         result = subprocess.run(
             ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout
@@ -72,6 +67,7 @@ def _git(repo: Path, *args: str, timeout: int = GIT_TIMEOUT) -> tuple[int, str]:
 
 
 def _gh(repo: Path, *args: str, timeout: int = GIT_TIMEOUT) -> tuple[int, str]:
+    """Run the GitHub CLI in `repo`; return its exit code and output."""
     try:
         result = subprocess.run(
             ["gh", *args], capture_output=True, text=True, timeout=timeout, cwd=str(repo)
@@ -84,24 +80,29 @@ def _gh(repo: Path, *args: str, timeout: int = GIT_TIMEOUT) -> tuple[int, str]:
 
 
 def _tail(text: str, limit: int = 800) -> str:
+    """The end of a command's output, for an error message."""
     return text.strip()[-limit:]
 
 
 def _repo_root(repo_dir: str | None) -> Path | None:
+    """The top of the git repository holding `repo_dir`, or the working directory."""
     start = Path(repo_dir) if repo_dir else Path.cwd()
     code, out = _git(start, "rev-parse", "--show-toplevel")
     return Path(out.strip()) if code == 0 else None
 
 
 def _remote() -> str:
+    """The git remote to push to."""
     return os.environ.get("GIT_REMOTE") or "origin"
 
 
 def _base() -> str:
+    """The branch pull requests target."""
     return os.environ.get("PR_BASE") or "main"
 
 
 def _remote_branch_exists(root: Path, remote: str, branch: str) -> bool:
+    """Whether `branch` exists on `remote`."""
     code, _ = _git(root, "ls-remote", "--exit-code", "--heads", remote, branch)
     return code == 0
 
@@ -117,14 +118,11 @@ def _github_repo(root: Path, remote: str) -> str | None:
 
 
 def git_push_feature_branch(module: str, title: str, repo_dir: str | None = None) -> str:
-    """Commit addons/<module> on branch feat/<module> and push it.
+    """Commit addons/<module> on feat/<module> and push it.
 
-    The commit is made in a temporary git worktree, so the checkout you are
-    working in keeps its branch, index and uncommitted changes. If the branch
-    already exists on the remote, the new commit goes on top of it - a
-    reviewer's commits are never overwritten; otherwise it starts from the
-    base branch. Only addons/<module> is committed, and the module folder on
-    the branch is made to match your local one exactly.
+    The commit is made in a temporary worktree, on top of the remote branch if
+    it exists and the base branch if not, so the caller's checkout is untouched
+    and earlier commits on the branch are kept.
 
     Args:
         module: module directory name under addons/, e.g. "purchase_bill_date_default".
@@ -134,7 +132,7 @@ def git_push_feature_branch(module: str, title: str, repo_dir: str | None = None
     Returns:
         The branch and commit that were pushed, or why nothing was.
     """
-    settings()                                   # make sure .env is loaded
+    settings()                                   # loads .env
     result = _push(module, title or f"Add {module}", repo_dir)
     audit.record(
         "git_push_feature_branch",
@@ -145,6 +143,7 @@ def git_push_feature_branch(module: str, title: str, repo_dir: str | None = None
 
 
 def _push(module: str, title: str, repo_dir: str | None) -> str:
+    """Check, commit in a temporary worktree and push; returns the outcome."""
     problem = validate_module(module)
     if problem:
         return problem
@@ -236,6 +235,7 @@ def open_pull_request(module: str, title: str, body: str, repo_dir: str | None =
 
 
 def _open_pr(module: str, title: str, body: str, repo_dir: str | None) -> str:
+    """Open the pull request unless one is already open; returns the outcome."""
     problem = validate_module(module)
     if problem:
         return problem
@@ -273,16 +273,16 @@ def _open_pr(module: str, title: str, body: str, repo_dir: str | None) -> str:
 
 
 def _truthy(value: str | None) -> bool:
+    """Whether an environment value means "on"."""
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def send_report_email(subject: str, body: str, attachments: list[str] | None = None) -> str:
     """Email a report to the configured address, with files attached.
 
-    The recipient is REPORT_EMAIL_TO and cannot be set by the caller, so an
-    agent cannot mail anyone else. Connects with implicit TLS when SMTP_SSL
-    is true or the port is 465, otherwise upgrades with STARTTLS; it refuses
-    to send over an unencrypted connection to anything but localhost.
+    The recipient is always REPORT_EMAIL_TO. Uses implicit TLS when SMTP_SSL is
+    true or the port is 465 and STARTTLS otherwise, and refuses an unencrypted
+    connection to anything but localhost.
 
     Args:
         subject: email subject.
@@ -305,9 +305,8 @@ def send_report_email(subject: str, body: str, attachments: list[str] | None = N
 def _attachment_names(paths: list[Path]) -> dict[Path, str]:
     """A distinct file name per attachment.
 
-    Before and after screenshots share a name (step-006.png); an inbox shows
-    two identical names. Repeated names take their parent folders as a prefix,
-    as many as it needs: screenshots-step-006.png, after-screenshots-step-006.png.
+    Repeated names take as many parent folders as they need as a prefix, e.g.
+    screenshots-step-006.png and after-screenshots-step-006.png.
     """
     names: dict[Path, str] = {}
     for path in paths:
@@ -328,6 +327,7 @@ def _attachment_names(paths: list[Path]) -> dict[Path, str]:
 def _build_message(
     sender: str, to: str, subject: str, body: str, attachments: list[str]
 ) -> tuple[EmailMessage, list[str], list[str]]:
+    """The email, with the names of the files attached and of those skipped."""
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = sender
@@ -369,13 +369,7 @@ def _build_message(
 
 
 def _hang_up(smtp: smtplib.SMTP) -> None:
-    """End the session without letting a failed goodbye undo a delivered message.
-
-    Once the server has accepted the message, a failure on QUIT (a dropped
-    connection, a timeout) changes nothing about delivery. Using the client as
-    a context manager would raise that error after the fact, report the email
-    as unsent, and invite an agent to retry and send a duplicate.
-    """
+    """Close the session; a failed QUIT after delivery does not make the send a failure."""
     try:
         smtp.quit()
     except (smtplib.SMTPException, OSError):
@@ -383,6 +377,7 @@ def _hang_up(smtp: smtplib.SMTP) -> None:
 
 
 def _send(subject: str, body: str, attachments: list[str]) -> str:
+    """Send the report over TLS; returns what was sent, or why nothing was."""
     to = (os.environ.get("REPORT_EMAIL_TO") or "").strip()
     host = (os.environ.get("SMTP_HOST") or "").strip()
     if not to:
@@ -397,8 +392,7 @@ def _send(subject: str, body: str, attachments: list[str]) -> str:
     except ValueError:
         return f"not sent: SMTP_PORT {raw_port!r} is not a number."
     if use_ssl and port in STARTTLS_PORTS:
-        # Implicit TLS against a STARTTLS port: the server resets the connection
-        # mid-handshake, which surfaces as an opaque "connection reset by peer".
+        # Otherwise the server resets the connection mid-handshake, with an opaque error.
         return (
             f"not sent: SMTP_SSL is on but SMTP_PORT is {port}, a STARTTLS port. "
             "Use port 465 for implicit TLS, or set SMTP_SSL=false. (An exported "

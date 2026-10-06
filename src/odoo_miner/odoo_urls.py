@@ -10,11 +10,9 @@ Odoo has used two URL styles:
   /odoo/purchase/7                      action path ("purchase") with record 7
   /odoo/account.move/1042  /odoo/m-website/3   model-based screens
 
-The path is parsed the way Odoo 18's router does it (web/static/src/core/browser/
-router.js): "action-<id|xmlid>" is an action, "m-<model>" or a segment with a dot
-is a model, any other word is an action path/tag, and a number (or "new") is the
-record of the screen before it. The *last* screen in the stack is the one the
-user is looking at, so that is what ends up in the context.
+Paths are read the way Odoo 18's router reads them
+(web/static/src/core/browser/router.js), and the last screen in the breadcrumb
+stack is the one returned.
 """
 
 from __future__ import annotations
@@ -25,6 +23,7 @@ from .models import OdooContext
 
 
 def _to_int(value: str | None) -> int | None:
+    """`value` as an int, or None if it is not one."""
     try:
         return int(value) if value is not None else None
     except ValueError:
@@ -32,18 +31,20 @@ def _to_int(value: str | None) -> int | None:
 
 
 def _first(params: dict[str, list[str]], key: str) -> str | None:
+    """The first value of a query parameter, or None."""
     values = params.get(key)
     return values[0] if values else None
 
 
 def parse_odoo_url(url: str | None) -> OdooContext:
+    """The model, record, action and view type a web client URL points at."""
     if not url:
         return OdooContext()
 
     parsed = urlparse(url)
     ctx = OdooContext()
 
-    # Legacy hash style, also tolerate the same keys in the query string.
+    # Legacy hash style; the same keys are accepted in the query string.
     params = parse_qs(parsed.fragment)
     for key, vals in parse_qs(parsed.query).items():
         params.setdefault(key, vals)

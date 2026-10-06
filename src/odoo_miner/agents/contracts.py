@@ -1,11 +1,7 @@
-"""Data contracts between agent stages.
+"""Data contracts between the agent stages.
 
-Every stage reads one file and writes one file, and each of those files
-validates against a model here. That is what lets a stage be re-run,
-inspected, or swapped on its own.
-
-`src/odoo_miner/models.py` holds the contracts for the recording pipeline
-(clicks, network calls, sessions); this module picks up where that leaves off.
+Each stage reads one file and writes one, validated against a model here. The
+recording pipeline's contracts are in `odoo_miner/models.py`.
 """
 
 from __future__ import annotations
@@ -75,15 +71,10 @@ class TracedSegment(BaseModel):
     explanation: str = ""
 
 
+# Separate from TracedSegment because QueryRef.domain is an untyped list, which
+# strict structured output rejects; the retrievals come from the captured calls.
 class TracedSegmentDraft(BaseModel):
-    """What the tracer agent itself returns.
-
-    `retrievals` are left out on purpose. They come straight from the captured
-    calls, so asking the model for them would be asking it to retype data we
-    already have - and `QueryRef.domain` is an untyped list, which Anthropic's
-    strict structured-output schema rejects. The code fills them in to build
-    the full `TracedSegment`.
-    """
+    """What the tracer agent returns for one segment; code adds the retrievals."""
 
     segment_id: str
     kind: SegmentKind
@@ -100,6 +91,8 @@ class TraceLog(BaseModel):
 
 
 class StepDifficulty(BaseModel):
+    """How hard one step was, and the signals behind the score."""
+
     step_index: int
     score: int = Field(ge=1, le=5)
     signals: dict[str, float] = Field(default_factory=dict)
@@ -107,6 +100,8 @@ class StepDifficulty(BaseModel):
 
 
 class SegmentAssessment(BaseModel):
+    """Effort and friction for one segment."""
+
     segment_id: str
     effort: float
     steps: list[StepDifficulty] = Field(default_factory=list)
@@ -123,6 +118,8 @@ class Assessment(BaseModel):
 
 
 class PlannedChange(BaseModel):
+    """One file the plan adds or changes."""
+
     file: str                             # "addons/odoo_miner_bill_date/views/account_move_views.xml"
     kind: Literal["new_file", "inherit_view", "inherit_model", "data", "config"]
     description: str
@@ -141,13 +138,12 @@ class Plan(BaseModel):
     expected_steps_after: int = 0
     acceptance_criteria: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
-    # Filled in by code after the model answers (planner.check_citations), so
-    # the approver sees which file references could not be confirmed.
+    # Set by planner.check_citations after the model answers.
     unverified_citations: list[str] = Field(default_factory=list)
 
 
 class BuildResult(BaseModel):
-    """Output of `odoo-miner build`."""
+    """What the builder returns: tests, replay, effort before and after, and delivery."""
 
     contract_version: str = CONTRACT_VERSION
     branch: str = ""

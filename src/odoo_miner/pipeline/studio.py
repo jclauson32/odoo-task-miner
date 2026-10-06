@@ -1,8 +1,7 @@
-"""Entry point for `langgraph dev` / LangGraph Studio.
+"""Entry point for `langgraph dev` and LangGraph Studio.
 
-The LangGraph server loads the file named in langgraph.json by path, outside
-its package, so that file cannot use relative imports. This one imports the
-pipeline absolutely; Studio supplies its own persistence.
+The server loads this file by path, outside the package, so it imports the
+pipeline absolutely. Studio provides its own persistence.
 """
 
 from odoo_miner.pipeline.graph import build_graph

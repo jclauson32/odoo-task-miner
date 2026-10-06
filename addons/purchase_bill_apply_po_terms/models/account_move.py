@@ -1,3 +1,4 @@
+"""The Apply PO Terms action on vendor bills."""
 from markupsafe import Markup
 
 from odoo import _, models
@@ -6,37 +7,24 @@ from odoo.tools import float_compare
 
 
 class AccountMove(models.Model):
+    """Vendor bills that can be set to their purchase order's terms."""
+
     _inherit = 'account.move'
 
     def action_apply_po_terms(self):
-        """Record every product line at its purchase order line's terms.
+        """Record each product line at its purchase order line's terms.
 
-        For every ``invoice_line_ids`` line with ``display_type == 'product'``:
-
-        * if it has a ``purchase_line_id`` that isn't shared with another
-          line on this bill, its price and quantity are rewritten to the PO
-          line's price and to "received/accepted less already billed
-          elsewhere" (``qty_to_invoice``, plus the line's own previous
-          quantity since ``qty_to_invoice`` already nets that out), with a
-          unit-of-measure conversion if the two lines don't share a UoM;
-        * if it has no ``purchase_line_id``, it is removed (it has no PO
-          backing and should be raised with the vendor);
-        * if its ``purchase_line_id`` is shared with another line on this
-          same bill, it is left untouched, since the correction can't be
-          apportioned between the two lines: if that's the only finding (no
-          other line changed or was removed), a ``UserError`` names them
-          instead of silently doing nothing or repeating a note forever.
-
-        Exactly one chatter message is posted listing every change and
-        removal with old and new values, and any shared-PO-line lines left
-        for manual review; nothing is posted if nothing needed to change.
-        Never posts/confirms the move.
+        A line linked to a PO line gets its price and the quantity received
+        less what was billed elsewhere; a line with no PO line is removed; a PO
+        line shared by two bill lines is left for a person. One chatter note
+        lists every change, old to new. The bill is never confirmed.
         """
         for move in self:
             move._apply_po_terms()
         return True
 
     def _apply_po_terms(self):
+        """Apply the PO terms to one draft vendor bill."""
         self.ensure_one()
         if self.state != 'draft' or self.move_type != 'in_invoice':
             raise UserError(_("Apply PO Terms can only be used on draft vendor bills."))
@@ -76,13 +64,8 @@ class AccountMove(models.Model):
                 ))
 
             target_price = po_line.product_uom._compute_price(po_line.price_unit, line.product_uom_id)
-            # Work in the PO line's own unit (the same unit qty_to_invoice is
-            # already expressed and rounded in - see
-            # addons/purchase/models/purchase_order_line.py:138-158) and
-            # convert back to the bill line's unit only once, instead of
-            # converting qty_to_invoice on its own and adding the bill
-            # line's quantity in a different unit: that would compound two
-            # separate UoM roundings and drift the result.
+            # Work in the PO line's unit, which qty_to_invoice is rounded in, and
+            # convert back once; converting each part separately drifts.
             billed_here = line.product_uom_id._compute_quantity(line.quantity, po_line.product_uom)
             target_qty = po_line.product_uom._compute_quantity(
                 po_line.qty_to_invoice + billed_here, line.product_uom_id)
@@ -97,16 +80,14 @@ class AccountMove(models.Model):
 
         if not to_update and not to_remove:
             if to_review:
-                # Nothing we can safely write or remove: say so instead of
-                # posting the same "needs manual review" note on every
-                # click, which would never converge to a no-op.
+                # Only shared PO lines: refuse rather than post the same note again.
                 review_products = ", ".join(sorted(set(to_review.mapped('product_id.display_name'))))
                 raise UserError(_(
                     "Cannot apply PO terms: %(products)s share a purchase order line with "
                     "another line on this bill. Resolve this manually, then try again.",
                     products=review_products,
                 ))
-            # Already at PO terms: idempotent no-op, no write, no chatter noise.
+            # Already at PO terms: nothing to write or post.
             return
 
         for line, changes in to_update:

@@ -1,3 +1,4 @@
+"""Tests for the Apply PO Terms action."""
 from odoo import fields
 from odoo.exceptions import UserError
 from odoo.tests import TransactionCase, tagged
@@ -5,16 +6,15 @@ from odoo.tests import TransactionCase, tagged
 
 @tagged('post_install', '-at_install')
 class TestAccountMoveApplyPOTerms(TransactionCase):
-    """Acceptance tests for account.move.action_apply_po_terms().
+    """Acceptance tests for action_apply_po_terms.
 
-    Deliberately avoids purchase_stock: the test product is a service with
-    purchase_method='receive' (services otherwise default to 'purchase'), so
-    'received' quantity is the manual qty_received field instead of stock
-    moves.
+    The products are services billed on received quantities, so qty_received
+    can be set directly and the tests do not need purchase_stock.
     """
 
     @classmethod
     def setUpClass(cls):
+        """Create the vendor, units of measure and products the tests share."""
         super().setUpClass()
         cls.partner = cls.env['res.partner'].create({'name': 'Apply PO Terms Vendor'})
         cls.uom_unit = cls.env.ref('uom.product_uom_unit')
@@ -42,6 +42,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         })
 
     def _create_po(self, product_qty, price_unit, qty_received, uom=None, currency=None, product=None):
+        """A confirmed one-line purchase order with `qty_received` recorded."""
         product = product or self.product
         uom = uom or self.uom_unit
         po = self.env['purchase.order'].create({
@@ -61,6 +62,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         return po
 
     def _create_bill(self, po_line, quantity, price_unit, uom=None, extra_lines=None, product=None):
+        """A draft vendor bill with one line linked to `po_line`, plus `extra_lines`."""
         product = product or po_line.product_id
         uom = uom or po_line.product_uom
         line_vals = [(0, 0, {
@@ -81,15 +83,12 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         })
 
     def test_price_and_quantity_rewritten_to_po_terms(self):
-        """A line with a purchase_line_id is rewritten to the PO's price and
-        to qty_to_invoice + its own previous quantity, only when either
-        differs."""
+        """A linked line gets the PO's price and the received quantity, and stays draft."""
         po = self._create_po(product_qty=10, price_unit=10.0, qty_received=10.0)
         po_line = po.order_line
         bill = self._create_bill(po_line, quantity=8, price_unit=12.0)
         bill_line = bill.invoice_line_ids
-        # qty_invoiced counts the draft line's own (wrong) quantity, so
-        # qty_to_invoice undershoots by exactly that amount.
+        # Odoo counts this draft line as invoiced, so qty_to_invoice is 10 - 8.
         self.assertAlmostEqual(po_line.qty_to_invoice, 2.0, places=2)
 
         bill.action_apply_po_terms()
@@ -100,11 +99,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         self.assertEqual(bill.state, 'draft')
 
     def test_uom_conversion_quantity_across_dozen_and_unit(self):
-        """The quantity is converted with _compute_quantity when the bill
-        line's UoM (units) differs from the PO line's (dozens): converting
-        the bill's own quantity into the PO line's unit before adding it
-        back to qty_to_invoice, and only then converting the total back,
-        avoids compounding two separate UoM roundings."""
+        """2 dozen received and billed in units comes out at exactly 24 units."""
         po = self._create_po(product_qty=2, price_unit=10.0, qty_received=2.0, uom=self.uom_dozen)
         po_line = po.order_line
         bill = self._create_bill(po_line, quantity=20, price_unit=1.0, uom=self.uom_unit)
@@ -112,18 +107,13 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
 
         bill.action_apply_po_terms()
 
-        # 2 dozen (24 units) received, fully reconstructed despite the
-        # dozen<->unit conversion not being a round decimal.
+        # 20 units round to 1.67 dozen; the result must still be 24 units.
         self.assertAlmostEqual(bill_line.quantity, 24.0, places=2)
         # 10.0 / dozen converted to per-unit.
         self.assertAlmostEqual(bill_line.price_unit, 10.0 / 12.0, places=4)
 
     def test_uom_conversion_of_price_and_quantity(self):
-        """When the bill line's UoM differs from the PO line's, the quantity
-        is converted with _compute_quantity and the price with
-        _compute_price."""
-        # PO in kg, bill in grams: a clean 1000:1 ratio avoids rounding noise
-        # and isolates the conversion itself from UoM rounding precision.
+        """Quantity and price are converted between kilograms and grams."""
         po = self._create_po(
             product_qty=2, price_unit=10.0, qty_received=2.0,
             uom=self.uom_kg, product=self.product_weight,
@@ -160,9 +150,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         self.assertNotIn(self.freight_product, bill.invoice_line_ids.product_id)
 
     def test_single_chatter_message_with_old_and_new_values_escaped(self):
-        """Exactly one message_post lists every change/removal with old and
-        new values, with HTML-unsafe values escaped; nothing is posted if
-        nothing changed."""
+        """One note lists every change, old to new and escaped; a second call posts none."""
         po = self._create_po(product_qty=10, price_unit=10.0, qty_received=10.0)
         po_line = po.order_line
         unsafe_product = self.env['product.product'].create({
@@ -197,8 +185,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         self.assertEqual(bill.message_ids, before_messages)
 
     def test_refuses_on_non_draft_move(self):
-        """Calling it on a state != 'draft' move raises UserError and leaves
-        the move's lines and state unchanged."""
+        """A posted bill is refused and left as it was."""
         po = self._create_po(product_qty=10, price_unit=10.0, qty_received=10.0)
         po_line = po.order_line
         bill = self._create_bill(po_line, quantity=8, price_unit=12.0)
@@ -212,8 +199,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         self.assertEqual(bill.invoice_line_ids.quantity, 8.0)
 
     def test_idempotent_second_call_is_a_noop(self):
-        """Calling it again right after, with no new deviations, writes
-        nothing and posts no further message."""
+        """A second call with nothing left to change writes and posts nothing."""
         po = self._create_po(product_qty=10, price_unit=10.0, qty_received=10.0)
         po_line = po.order_line
         bill = self._create_bill(po_line, quantity=8, price_unit=12.0)
@@ -228,11 +214,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         self.assertEqual(bill.invoice_line_ids.write_date, write_date_after_first_call)
 
     def test_shared_purchase_line_raises_instead_of_reapplying(self):
-        """A bill line whose purchase_line_id is referenced by another line
-        on the same bill is left untouched, not recalculated. Since that is
-        the only finding here (nothing else to write or remove), it raises
-        a UserError naming the lines instead of silently doing nothing or
-        posting the same "needs review" note on every click."""
+        """Two lines sharing a PO line are left alone, and the user is told why."""
         po = self._create_po(product_qty=10, price_unit=10.0, qty_received=10.0)
         po_line = po.order_line
         bill = self._create_bill(
@@ -253,7 +235,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         with self.assertRaises(UserError):
             bill.action_apply_po_terms()
 
-        # Left untouched: neither recalculated nor removed nor noted about.
+        # Left as they were, with no note posted.
         self.assertEqual(len(bill.invoice_line_ids), 2)
         for line in lines:
             self.assertEqual(line.price_unit, 12.0)
@@ -261,8 +243,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         self.assertEqual(bill.message_ids, before_messages)
 
     def test_refuses_on_refund_move(self):
-        """A vendor refund (in_refund) is refused like any non-in_invoice
-        move, and is never confirmed."""
+        """A vendor refund is refused and stays draft."""
         po = self._create_po(product_qty=10, price_unit=10.0, qty_received=10.0)
         po_line = po.order_line
         refund = self.env['account.move'].create({
@@ -287,8 +268,7 @@ class TestAccountMoveApplyPOTerms(TransactionCase):
         self.assertEqual(refund.invoice_line_ids.quantity, 8.0)
 
     def test_currency_mismatch_raises_user_error(self):
-        """A PO line in a different currency than the bill raises UserError
-        instead of silently misapplying the price."""
+        """A PO in another currency is refused instead of having its price copied."""
         other_currency = self.env['res.currency'].with_context(active_test=False).search(
             [('id', '!=', self.env.company.currency_id.id)], limit=1)
         other_currency.sudo().write({'active': True})

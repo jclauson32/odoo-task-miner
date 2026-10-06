@@ -325,10 +325,7 @@ def render_segment(seg: Segment, assessment: SegmentAssessment, session: Session
     ]
     for step in assessment.steps:
         click = by_index.get(step.step_index)
-        target = ""
-        if click and click.target:
-            target = (click.target.aria_label or click.target.text
-                      or click.target.button_name or click.target.css or "")
+        target = click.target_label() if click and click.target else ""
         signals = ", ".join(sorted(step.signals)) or "none"
         value = f" = {click.value!r}" if click and click.value else ""
         lines.append(

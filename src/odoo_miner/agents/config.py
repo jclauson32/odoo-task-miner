@@ -93,6 +93,11 @@ def settings() -> Settings:
     )
 
 
+def truthy(value: str | None) -> bool:
+    """Whether an environment value means "on"."""
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def load_prompt(name: str) -> str:
     """A prompt's text, by name."""
     return settings().prompt(name)

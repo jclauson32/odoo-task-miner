@@ -22,14 +22,6 @@ def is_noise(click: SessionClick) -> bool:
     return click.type in ("keyDown", "keyUp") and click.key in NOISE_KEYS
 
 
-def target_text(click: SessionClick) -> str:
-    """The most readable name for what a step acted on."""
-    t = click.target
-    if not t:
-        return click.url or ""
-    return t.aria_label or t.text or t.button_name or t.css or ""
-
-
 def boundary_hints(session: Session) -> dict[int, list[str]]:
     """Hints for the prompt about where segments may start and end.
 
@@ -68,7 +60,7 @@ def render_step(click: SessionClick, hints: dict[int, list[str]]) -> str:
     parts = [
         f"{click.step_index:>3}",
         f"{click.type:<11}",
-        f'"{target_text(click)[:46]}"',
+        f'"{click.target_label()[:46]}"',
     ]
     if value:
         parts.append(f"= {value[:20]!r}")
